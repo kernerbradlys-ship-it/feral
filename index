@@ -1,0 +1,2067 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>FERAL // Survival</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0f0d;
+    --bg-panel: #141a18;
+    --bg-inset: #0e1412;
+    --border: #2d3a35;
+    --border-bright: #4a5e55;
+    --text: #d4c5a0;
+    --text-dim: #8a9b8e;
+    --text-faded: #566561;
+    --amber: #ffb347;
+    --amber-dim: #b87a28;
+    --green: #7cbd56;
+    --green-dim: #4d7a33;
+    --red: #d35454;
+    --red-dim: #8a2828;
+    --blue: #6ab0c4;
+    --purple: #a87ec8;
+    --tile: 22px;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --display: 'VT323', 'JetBrains Mono', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  body {
+    background:
+      radial-gradient(ellipse at 20% 10%, rgba(255,179,71,0.04), transparent 50%),
+      radial-gradient(ellipse at 80% 90%, rgba(124,189,86,0.03), transparent 50%),
+      var(--bg);
+  }
+
+  /* subtle CRT scanlines */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(0,0,0,0.08) 0px,
+      rgba(0,0,0,0.08) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    z-index: 9999;
+    opacity: 0.4;
+  }
+
+  /* ================ LOADING / LOGIN ================ */
+  #login {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    z-index: 100;
+    padding: 20px;
+  }
+
+  #login h1 {
+    font-family: var(--display);
+    font-size: 72px;
+    letter-spacing: 8px;
+    color: var(--amber);
+    text-shadow: 0 0 20px rgba(255,179,71,0.5), 0 0 40px rgba(255,179,71,0.2);
+    margin-bottom: 8px;
+  }
+
+  #login .subtitle {
+    font-size: 11px;
+    letter-spacing: 4px;
+    color: var(--text-dim);
+    margin-bottom: 40px;
+    text-transform: uppercase;
+  }
+
+  #login .box {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    padding: 24px;
+    max-width: 380px;
+    width: 100%;
+  }
+
+  #login label {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  #login input {
+    width: 100%;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 14px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    outline: none;
+  }
+
+  #login input:focus {
+    border-color: var(--amber);
+  }
+
+  #login button {
+    width: 100%;
+    background: var(--amber);
+    color: var(--bg);
+    border: none;
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 2px;
+    padding: 12px;
+    cursor: pointer;
+    text-transform: uppercase;
+  }
+
+  #login button:hover { background: #ffc96b; }
+  #login button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #login .status {
+    margin-top: 16px;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: center;
+    min-height: 14px;
+  }
+  #login .err { color: var(--red); }
+
+  #login .footer {
+    margin-top: 30px;
+    font-size: 10px;
+    color: var(--text-faded);
+    text-align: center;
+    letter-spacing: 1px;
+  }
+
+  /* ================ GAME LAYOUT ================ */
+  #game { display: none; height: 100vh; width: 100vw; }
+  #game.active { display: grid; grid-template-columns: 1fr 320px; }
+
+  @media (max-width: 860px) {
+    #game.active { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  }
+
+  /* ================ WORLD VIEW ================ */
+  #world-wrap {
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-inset);
+    border-right: 1px solid var(--border);
+  }
+
+  @media (max-width: 860px) {
+    #world-wrap { border-right: none; border-bottom: 1px solid var(--border); }
+  }
+
+  #world {
+    display: block;
+    background: #0d110f;
+    image-rendering: pixelated;
+  }
+
+  /* HUD overlays */
+  .hud {
+    position: absolute;
+    background: rgba(10, 15, 13, 0.88);
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    backdrop-filter: blur(4px);
+    font-size: 11px;
+    pointer-events: none;
+  }
+
+  #hud-top-left { top: 10px; left: 10px; min-width: 170px; }
+  #hud-top-right { top: 10px; right: 10px; }
+  #hud-bottom-left { bottom: 10px; left: 10px; }
+
+  .hud-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    line-height: 1.6;
+  }
+
+  .hud-label { color: var(--text-dim); letter-spacing: 1px; }
+  .hud-val { color: var(--amber); font-weight: 700; }
+  .hud-val.green { color: var(--green); }
+  .hud-val.red { color: var(--red); }
+
+  /* Minimap */
+  #minimap {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 150px;
+    height: 150px;
+    background: rgba(10, 15, 13, 0.88);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(4px);
+  }
+  @media (max-width: 860px) { #minimap { width: 100px; height: 100px; } }
+
+  /* Log */
+  #log {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    width: 380px;
+    max-width: calc(100% - 20px);
+    max-height: 140px;
+    background: rgba(10, 15, 13, 0.88);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(4px);
+    overflow-y: auto;
+    font-size: 11px;
+    line-height: 1.6;
+    padding: 8px 12px;
+  }
+  @media (max-width: 860px) { #log { max-height: 80px; width: 240px; } }
+
+  #log::-webkit-scrollbar { width: 4px; }
+  #log::-webkit-scrollbar-track { background: transparent; }
+  #log::-webkit-scrollbar-thumb { background: var(--border); }
+
+  .log-entry { margin-bottom: 2px; }
+  .log-time { color: var(--text-faded); margin-right: 8px; }
+  .log-info { color: var(--text); }
+  .log-good { color: var(--green); }
+  .log-bad { color: var(--red); }
+  .log-system { color: var(--amber); }
+
+  /* Virtual dpad (mobile) */
+  #dpad {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    display: none;
+    grid-template-columns: repeat(3, 52px);
+    grid-template-rows: repeat(3, 52px);
+    gap: 2px;
+    z-index: 5;
+  }
+  @media (hover: none) and (pointer: coarse) { #dpad { display: grid; } }
+
+  .dpad-btn {
+    background: rgba(20, 26, 24, 0.85);
+    border: 1px solid var(--border-bright);
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 700;
+    user-select: none;
+    -webkit-user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .dpad-btn:active { background: rgba(255,179,71,0.2); }
+  .dpad-btn.empty { visibility: hidden; }
+
+  /* ================ SIDE PANEL ================ */
+  #panel {
+    background: var(--bg-panel);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  @media (max-width: 860px) {
+    #panel { border-left: none; max-height: 40vh; }
+  }
+
+  .brand {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .brand .logo {
+    font-family: var(--display);
+    font-size: 24px;
+    letter-spacing: 4px;
+    color: var(--amber);
+    text-shadow: 0 0 10px rgba(255,179,71,0.3);
+  }
+  .brand .nickname {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .brand .nickname .name { color: var(--green); font-weight: 700; }
+
+  .tabs {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-inset);
+  }
+  .tab {
+    padding: 10px 4px;
+    text-align: center;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-right: 1px solid var(--border);
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .tab:last-child { border-right: none; }
+  .tab.active {
+    color: var(--amber);
+    background: var(--bg-panel);
+    box-shadow: inset 0 2px 0 var(--amber);
+  }
+  .tab:hover:not(.active) { color: var(--text); }
+
+  .tab-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+  .tab-content::-webkit-scrollbar { width: 6px; }
+  .tab-content::-webkit-scrollbar-track { background: var(--bg-inset); }
+  .tab-content::-webkit-scrollbar-thumb { background: var(--border-bright); }
+
+  .section-title {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    font-size: 11px;
+    margin-bottom: 16px;
+  }
+  .stat-grid .k { color: var(--text-dim); }
+  .stat-grid .v { color: var(--amber); text-align: right; font-weight: 700; }
+  .stat-grid .v.green { color: var(--green); }
+
+  .bar {
+    height: 6px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    position: relative;
+    margin-bottom: 10px;
+  }
+  .bar-fill { position: absolute; inset: 0; transform-origin: left; }
+  .bar-fill.hp { background: var(--red); }
+  .bar-fill.xp { background: var(--amber); }
+
+  .inv-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+  .inv-slot {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    padding: 8px 6px;
+    text-align: center;
+    font-size: 10px;
+    position: relative;
+    min-height: 56px;
+  }
+  .inv-slot .icon { font-size: 20px; line-height: 1; }
+  .inv-slot .name { color: var(--text-dim); margin-top: 4px; font-size: 9px; letter-spacing: 0.5px; }
+  .inv-slot .count {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    font-weight: 700;
+    color: var(--amber);
+    font-size: 11px;
+  }
+  .inv-slot.empty { opacity: 0.3; }
+
+  .creature-card {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    padding: 10px;
+    margin-bottom: 8px;
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    gap: 10px;
+    align-items: center;
+    cursor: pointer;
+  }
+  .creature-card:hover { border-color: var(--border-bright); }
+  .creature-card .sprite {
+    font-size: 28px;
+    text-align: center;
+    line-height: 1;
+  }
+  .creature-card .info { min-width: 0; }
+  .creature-card .row-1 {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+  .creature-card .species { color: var(--text); font-weight: 700; }
+  .creature-card .lvl { color: var(--amber); }
+  .creature-card .stats-mini {
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  .recipe, .build-opt {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    padding: 10px;
+    margin-bottom: 8px;
+    cursor: pointer;
+  }
+  .recipe:hover, .build-opt:hover { border-color: var(--amber); }
+  .recipe.disabled, .build-opt.disabled { opacity: 0.4; cursor: not-allowed; }
+  .recipe:hover.disabled, .build-opt:hover.disabled { border-color: var(--border); }
+  .recipe .head, .build-opt .head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .recipe .icon, .build-opt .icon { font-size: 16px; }
+  .recipe .cost, .build-opt .cost {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.5px;
+  }
+  .recipe .cost .have { color: var(--green); }
+  .recipe .cost .need { color: var(--red); }
+
+  .empty-state {
+    text-align: center;
+    color: var(--text-faded);
+    padding: 30px 10px;
+    font-size: 11px;
+    font-style: italic;
+  }
+
+  /* ================ MODAL ================ */
+  #modal-bg {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    backdrop-filter: blur(2px);
+    padding: 20px;
+  }
+  #modal-bg.open { display: flex; }
+  .modal {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-bright);
+    max-width: 440px;
+    width: 100%;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+  }
+  .modal-head {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .modal-title {
+    font-family: var(--display);
+    font-size: 22px;
+    letter-spacing: 3px;
+    color: var(--amber);
+  }
+  .modal-close {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 18px;
+  }
+  .modal-body { padding: 16px; }
+  .modal-btns {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .btn {
+    background: var(--bg-inset);
+    border: 1px solid var(--border-bright);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    padding: 8px 14px;
+    cursor: pointer;
+    text-transform: uppercase;
+  }
+  .btn:hover { border-color: var(--amber); color: var(--amber); }
+  .btn.primary { background: var(--amber); color: var(--bg); border-color: var(--amber); font-weight: 700; }
+  .btn.primary:hover { background: #ffc96b; color: var(--bg); }
+  .btn.danger { background: var(--red-dim); color: var(--text); border-color: var(--red); }
+  .btn.danger:hover { background: var(--red); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Combat modal specifics */
+  .combat-arena {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 16px;
+    align-items: center;
+    padding: 16px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+  .combat-side { text-align: center; }
+  .combat-sprite { font-size: 48px; line-height: 1; margin-bottom: 8px; }
+  .combat-name { font-weight: 700; color: var(--text); margin-bottom: 2px; }
+  .combat-lvl { font-size: 10px; color: var(--text-dim); letter-spacing: 1px; margin-bottom: 8px; }
+  .combat-hp-label { font-size: 9px; color: var(--text-dim); letter-spacing: 1px; margin-bottom: 2px; }
+  .combat-vs {
+    font-family: var(--display);
+    font-size: 32px;
+    color: var(--amber);
+    letter-spacing: 2px;
+  }
+  .combat-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  #combat-log {
+    max-height: 100px;
+    overflow-y: auto;
+    font-size: 11px;
+    line-height: 1.6;
+    padding: 8px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+
+  /* place building modal shows options */
+  .place-hint {
+    font-size: 11px;
+    color: var(--amber);
+    text-align: center;
+    padding: 8px;
+    background: rgba(255,179,71,0.1);
+    border: 1px dashed var(--amber);
+    margin-bottom: 12px;
+  }
+
+  /* creature detail */
+  .iv-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px 16px;
+    font-size: 10px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .iv-grid .k { color: var(--text-dim); }
+  .iv-grid .v { color: var(--amber); text-align: right; }
+  .iv-grid .v.perfect { color: var(--green); }
+
+  /* config warning */
+  #config-warn {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--red-dim);
+    color: var(--text);
+    border: 1px solid var(--red);
+    padding: 8px 16px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    z-index: 200;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============== CONFIG WARNING ============== -->
+<div id="config-warn">⚠ FIREBASE CONFIG NOT SET — see README.md</div>
+
+<!-- ============== LOGIN ============== -->
+<div id="login">
+  <h1>FERAL</h1>
+  <div class="subtitle">survival · taming · ruin</div>
+  <div class="box">
+    <label for="nick-input">enter nickname</label>
+    <input id="nick-input" type="text" maxlength="16" placeholder="raider42" autocomplete="off">
+    <button id="enter-btn">enter world</button>
+    <div class="status" id="login-status"></div>
+  </div>
+  <div class="footer">5 player max · data persists · share the link</div>
+</div>
+
+<!-- ============== GAME ============== -->
+<div id="game">
+  <div id="world-wrap">
+    <canvas id="world"></canvas>
+
+    <div id="hud-top-left" class="hud">
+      <div class="hud-row"><span class="hud-label">HP</span><span class="hud-val red" id="hud-hp">100/100</span></div>
+      <div class="hud-row"><span class="hud-label">GOLD</span><span class="hud-val" id="hud-gold">0</span></div>
+      <div class="hud-row"><span class="hud-label">POS</span><span class="hud-val green" id="hud-pos">0,0</span></div>
+      <div class="hud-row"><span class="hud-label">BIOME</span><span class="hud-val" id="hud-biome">—</span></div>
+    </div>
+
+    <canvas id="minimap" width="150" height="150"></canvas>
+
+    <div id="log"></div>
+
+    <div id="dpad">
+      <div class="dpad-btn empty"></div>
+      <div class="dpad-btn" data-dir="up">▲</div>
+      <div class="dpad-btn empty"></div>
+      <div class="dpad-btn" data-dir="left">◀</div>
+      <div class="dpad-btn" data-dir="act">•</div>
+      <div class="dpad-btn" data-dir="right">▶</div>
+      <div class="dpad-btn empty"></div>
+      <div class="dpad-btn" data-dir="down">▼</div>
+      <div class="dpad-btn empty"></div>
+    </div>
+  </div>
+
+  <aside id="panel">
+    <div class="brand">
+      <div class="logo">FERAL</div>
+      <div class="nickname">playing as <span class="name" id="brand-name">—</span></div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="stats">Stats</div>
+      <div class="tab" data-tab="inv">Inv</div>
+      <div class="tab" data-tab="crit">Tame</div>
+      <div class="tab" data-tab="craft">Craft</div>
+      <div class="tab" data-tab="build">Build</div>
+    </div>
+
+    <div class="tab-content" id="tab-stats">
+      <div class="section-title">Status</div>
+      <div class="stat-grid">
+        <span class="k">Health</span><span class="v red" id="s-hp">100/100</span>
+        <span class="k">Level</span><span class="v" id="s-lvl">1</span>
+        <span class="k">XP</span><span class="v" id="s-xp">0/100</span>
+        <span class="k">Gold</span><span class="v" id="s-gold">0</span>
+        <span class="k">Position</span><span class="v green" id="s-pos">0,0</span>
+        <span class="k">Biome</span><span class="v" id="s-biome">—</span>
+      </div>
+      <div class="section-title">Controls</div>
+      <div style="font-size:11px;line-height:1.8;color:var(--text-dim)">
+        <div><span style="color:var(--amber)">WASD</span> / <span style="color:var(--amber)">arrows</span> — move</div>
+        <div><span style="color:var(--amber)">Click</span> tile — interact</div>
+        <div><span style="color:var(--amber)">Space</span> — gather/attack on tile</div>
+        <div><span style="color:var(--amber)">Tab</span> — cycle panels</div>
+      </div>
+      <div class="section-title" style="margin-top:16px">Session</div>
+      <div style="font-size:11px;color:var(--text-dim);line-height:1.8">
+        <div>Online: <span id="s-online" style="color:var(--green)">0</span> / 5</div>
+        <div>World seed: <span id="s-seed" style="color:var(--amber)">—</span></div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-inv" style="display:none">
+      <div class="section-title">Resources</div>
+      <div class="inv-grid" id="inv-resources"></div>
+      <div class="section-title">Tools &amp; Gear</div>
+      <div class="inv-grid" id="inv-tools"></div>
+    </div>
+
+    <div class="tab-content" id="tab-crit" style="display:none">
+      <div class="section-title">Owned Creatures (<span id="crit-count">0</span>/50)</div>
+      <div id="crit-list"></div>
+    </div>
+
+    <div class="tab-content" id="tab-craft" style="display:none">
+      <div class="section-title">Stone Workbench · Tier 1</div>
+      <div id="recipes"></div>
+      <div class="section-title" style="margin-top:16px">Locked Tiers</div>
+      <div style="font-size:10px;color:var(--text-faded);line-height:1.8">
+        <div>Tier 2 · Copper workbench</div>
+        <div>Tier 3 · Iron workbench</div>
+        <div>Tier 4 · Steel workbench</div>
+        <div>Tier 5 · Advanced workbench</div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-build" style="display:none">
+      <div class="section-title">Structures</div>
+      <div id="buildings"></div>
+      <div class="section-title" style="margin-top:16px">My Bases</div>
+      <div id="my-bases" style="font-size:11px;color:var(--text-dim)"></div>
+    </div>
+  </aside>
+</div>
+
+<!-- ============== MODAL ============== -->
+<div id="modal-bg">
+  <div class="modal" id="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="modal-title">—</div>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-btns" id="modal-btns"></div>
+  </div>
+</div>
+
+<!-- ============== FIREBASE SDK ============== -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import {
+  getDatabase, ref, set, get, update, onValue, onDisconnect,
+  push, child, remove, serverTimestamp, runTransaction
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+// ============================================================
+// >>>>>>>>>>>>>>  FIREBASE CONFIG — FILL THIS IN  <<<<<<<<<<<<<
+// ============================================================
+// Create a Firebase project at https://console.firebase.google.com
+// Enable "Realtime Database" (not Firestore). Start in test mode.
+// Paste your web app config values below.
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyAyezhm9Ruund-sbGP_CSt0pf1LGFy_Rm4",
+  authDomain: "feral-game.firebaseapp.com",
+  databaseURL: "https://feral-game-default-rtdb.firebaseio.com",
+  projectId: "feral-game",
+  storageBucket: "feral-game.firebasestorage.app",
+  messagingSenderId: "707537845800",
+  appId: "1:707537845800:web:42603d22b00ef2c9317f1d"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+// ============================================================
+
+const CONFIG_OK = FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY_HERE";
+if (!CONFIG_OK) {
+  document.getElementById('config-warn').style.display = 'block';
+}
+
+let app, db;
+try {
+  if (CONFIG_OK) {
+    app = initializeApp(FIREBASE_CONFIG);
+    db = getDatabase(app);
+  }
+} catch (e) {
+  console.error("Firebase init failed:", e);
+}
+
+// ============================================================
+// GAME CONSTANTS
+// ============================================================
+const WORLD_SIZE = 50;
+const VIEW_TILES = 19;          // odd number — player centered
+const TILE_PX_BASE = 28;        // base tile pixel size
+const MAX_PLAYERS = 5;
+const RESPAWN_MS = 60_000;      // resource respawn
+const CREATURE_MOVE_MS = 4000;  // wild creature wander tick (client-simulated, stateless)
+const MAX_CREATURES_OWNED = 50;
+
+const BIOMES = {
+  grass:    { glyph: '.', name: 'Grasslands', color: '#1a2e1a', colorLite: '#2a4020', walkable: true },
+  forest:   { glyph: '♣', name: 'Forest',     color: '#14251c', colorLite: '#1c3325', walkable: true },
+  mountain: { glyph: '^', name: 'Mountain',   color: '#2a2520', colorLite: '#3a342d', walkable: true },
+  water:    { glyph: '~', name: 'Water',      color: '#152535', colorLite: '#1f3548', walkable: false },
+  cave:     { glyph: '•', name: 'Cave',       color: '#101010', colorLite: '#181818', walkable: true },
+  sand:     { glyph: '░', name: 'Beach',      color: '#3a3020', colorLite: '#4a3d28', walkable: true },
+};
+
+const RESOURCES = {
+  tree:   { glyph: '🌲', name: 'Tree',   drops: 'wood',  amount: 3, biomes: ['forest','grass'] },
+  rock:   { glyph: '🪨', name: 'Rock',   drops: 'stone', amount: 2, biomes: ['mountain','cave','grass'] },
+  copper: { glyph: '🟠', name: 'Copper', drops: 'copper',amount: 1, biomes: ['mountain','cave'] },
+  iron:   { glyph: '⚙️', name: 'Iron',   drops: 'iron',  amount: 1, biomes: ['cave','mountain'] },
+  berry:  { glyph: '🫐', name: 'Berry',  drops: 'food',  amount: 2, biomes: ['grass','forest'] },
+};
+
+const ITEMS = {
+  wood:   { icon: '🪵', name: 'Wood' },
+  stone:  { icon: '🪨', name: 'Stone' },
+  copper: { icon: '🟠', name: 'Copper' },
+  iron:   { icon: '⚙️', name: 'Iron' },
+  food:   { icon: '🫐', name: 'Food' },
+  stone_axe:     { icon: '🪓', name: 'Stone Axe', tool: true, bonus: 'wood' },
+  stone_pick:    { icon: '⛏️', name: 'Stone Pick', tool: true, bonus: 'stone' },
+  stone_sword:   { icon: '🗡️', name: 'Stone Sword', tool: true, bonus: 'atk' },
+  leather_armor: { icon: '🎽', name: 'Hide Armor', tool: true, bonus: 'def' },
+  tame_net:      { icon: '🕸️', name: 'Tame Net', tool: true, consumable: true },
+};
+
+const RECIPES = [
+  { id: 'stone_axe',     out: 'stone_axe',     qty: 1, req: { wood: 4, stone: 3 } },
+  { id: 'stone_pick',    out: 'stone_pick',    qty: 1, req: { wood: 3, stone: 5 } },
+  { id: 'stone_sword',   out: 'stone_sword',   qty: 1, req: { wood: 2, stone: 4 } },
+  { id: 'leather_armor', out: 'leather_armor', qty: 1, req: { wood: 2, food: 5 } },
+  { id: 'tame_net',      out: 'tame_net',      qty: 3, req: { wood: 2, food: 2 } },
+];
+
+const BUILDINGS = {
+  wall:     { icon: '🧱', name: 'Wood Wall',    req: { wood: 4 },            hp: 100, walkable: false },
+  storage:  { icon: '📦', name: 'Storage Box',  req: { wood: 6, stone: 2 },  hp: 80,  walkable: false },
+  bench:    { icon: '🔨', name: 'Stone Bench',  req: { wood: 5, stone: 8 },  hp: 150, walkable: false },
+  torch:    { icon: '🔥', name: 'Torch',        req: { wood: 2 },            hp: 30,  walkable: true },
+};
+
+// Species registry — base stats, biome spawn, evolution line
+const SPECIES = {
+  fox:    { glyph: '🦊', name: 'Fox',      biomes:['forest','grass'],  base:{hp:40, atk:22, def:15, spd:28}, evo:null },
+  bear:   { glyph: '🐻', name: 'Bear',     biomes:['forest','mountain'],base:{hp:80, atk:30, def:25, spd:12}, evo:null },
+  hawk:   { glyph: '🦅', name: 'Hawk',     biomes:['mountain'],        base:{hp:35, atk:26, def:12, spd:35}, evo:null },
+  turtle: { glyph: '🐢', name: 'Turtle',   biomes:['water','sand'],    base:{hp:70, atk:14, def:40, spd:8},  evo:null },
+  bat:    { glyph: '🦇', name: 'Bat',      biomes:['cave'],            base:{hp:30, atk:20, def:10, spd:30}, evo:null },
+  snake:  { glyph: '🐍', name: 'Snake',    biomes:['grass','sand'],    base:{hp:35, atk:28, def:12, spd:24}, evo:null },
+  boar:   { glyph: '🐗', name: 'Boar',     biomes:['forest','grass'],  base:{hp:60, atk:25, def:20, spd:18}, evo:null },
+  wolf:   { glyph: '🐺', name: 'Wolf',     biomes:['forest','mountain'],base:{hp:50, atk:28, def:16, spd:26}, evo:null },
+  crab:   { glyph: '🦀', name: 'Crab',     biomes:['water','sand'],    base:{hp:45, atk:20, def:30, spd:10}, evo:null },
+};
+
+// ============================================================
+// PRNG + world gen (deterministic from seed)
+// ============================================================
+function mulberry32(seed) {
+  return function() {
+    let t = seed += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// Simple value-noise-ish lookup for biome assignment
+function noise2(seed, x, y) {
+  const h = (x * 374761393 + y * 668265263 + seed * 2246822519) | 0;
+  const n = (h ^ (h >>> 13)) * 1274126177;
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+}
+
+function smoothNoise(seed, x, y, scale) {
+  const xs = x / scale, ys = y / scale;
+  const xi = Math.floor(xs), yi = Math.floor(ys);
+  const xf = xs - xi, yf = ys - yi;
+  const n00 = noise2(seed, xi, yi);
+  const n10 = noise2(seed, xi + 1, yi);
+  const n01 = noise2(seed, xi, yi + 1);
+  const n11 = noise2(seed, xi + 1, yi + 1);
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  return (n00 * (1 - u) + n10 * u) * (1 - v) + (n01 * (1 - u) + n11 * u) * v;
+}
+
+function generateWorld(seed) {
+  const map = [];
+  for (let y = 0; y < WORLD_SIZE; y++) {
+    map[y] = [];
+    for (let x = 0; x < WORLD_SIZE; x++) {
+      const elev = smoothNoise(seed, x, y, 8) * 0.6 + smoothNoise(seed + 1, x, y, 3) * 0.4;
+      const moist = smoothNoise(seed + 91, x, y, 10);
+      const caveNoise = smoothNoise(seed + 173, x, y, 4);
+
+      let biome;
+      if (elev < 0.30) biome = 'water';
+      else if (elev < 0.36) biome = 'sand';
+      else if (elev > 0.78) biome = 'mountain';
+      else if (caveNoise > 0.82 && elev > 0.5) biome = 'cave';
+      else if (moist > 0.6) biome = 'forest';
+      else biome = 'grass';
+
+      map[y][x] = { biome, resource: null };
+
+      // Resource seeding based on biome (deterministic)
+      const r = noise2(seed + 777, x, y);
+      if (biome === 'forest' && r < 0.25) map[y][x].resource = 'tree';
+      else if (biome === 'forest' && r < 0.28) map[y][x].resource = 'berry';
+      else if (biome === 'grass' && r < 0.08) map[y][x].resource = 'tree';
+      else if (biome === 'grass' && r < 0.12) map[y][x].resource = 'rock';
+      else if (biome === 'grass' && r < 0.15) map[y][x].resource = 'berry';
+      else if (biome === 'mountain' && r < 0.20) map[y][x].resource = 'rock';
+      else if (biome === 'mountain' && r < 0.24) map[y][x].resource = 'copper';
+      else if (biome === 'cave' && r < 0.20) map[y][x].resource = 'iron';
+      else if (biome === 'cave' && r < 0.30) map[y][x].resource = 'copper';
+      else if (biome === 'cave' && r < 0.38) map[y][x].resource = 'rock';
+    }
+  }
+  return map;
+}
+
+// Deterministic wild creature placement based on seed + time bucket
+// (they "wander" as the bucket rolls over; no server state needed)
+function getWildCreatures(seed, timeBucket) {
+  const creatures = [];
+  const rng = mulberry32(seed ^ (timeBucket * 31337));
+  const target = 40; // wild creature count on map
+  let placed = 0, tries = 0;
+  while (placed < target && tries < 600) {
+    tries++;
+    const x = Math.floor(rng() * WORLD_SIZE);
+    const y = Math.floor(rng() * WORLD_SIZE);
+    const tile = world[y]?.[x];
+    if (!tile) continue;
+    // find a species that spawns here
+    const candidates = Object.keys(SPECIES).filter(k => SPECIES[k].biomes.includes(tile.biome));
+    if (!candidates.length) continue;
+    const species = candidates[Math.floor(rng() * candidates.length)];
+    const lvl = 1 + Math.floor(rng() * 8);
+    creatures.push({ id: `w_${timeBucket}_${x}_${y}`, wild: true, species, x, y, lvl });
+    placed++;
+  }
+  return creatures;
+}
+
+// ============================================================
+// STATE
+// ============================================================
+let world = null;
+let worldSeed = null;
+let me = null; // { name, x, y, hp, maxHp, gold, lvl, xp, inv:{}, tools:{}, creatures:[] }
+let otherPlayers = {};
+let ownedCreatures = {};  // id -> creature obj
+let wildCreatures = [];
+let buildings = {};       // id -> building
+let depletedResources = {}; // `x_y` -> respawnAt timestamp
+let currentTab = 'stats';
+let placingBuilding = null;
+let combatState = null;
+
+// rendering
+const canvas = document.getElementById('world');
+const ctx = canvas.getContext('2d');
+const miniCanvas = document.getElementById('minimap');
+const miniCtx = miniCanvas.getContext('2d');
+let tilePx = TILE_PX_BASE;
+
+// input
+const keys = {};
+let lastMoveTime = 0;
+const MOVE_COOLDOWN = 120; // ms
+
+// ============================================================
+// LOGGING
+// ============================================================
+function log(msg, kind = 'info') {
+  const el = document.getElementById('log');
+  const t = new Date();
+  const hh = String(t.getHours()).padStart(2,'0');
+  const mm = String(t.getMinutes()).padStart(2,'0');
+  const ss = String(t.getSeconds()).padStart(2,'0');
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.innerHTML = `<span class="log-time">${hh}:${mm}:${ss}</span><span class="log-${kind}">${msg}</span>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+  while (el.children.length > 50) el.removeChild(el.firstChild);
+}
+
+// ============================================================
+// LOGIN FLOW
+// ============================================================
+const loginEl = document.getElementById('login');
+const gameEl = document.getElementById('game');
+const nickInput = document.getElementById('nick-input');
+const enterBtn = document.getElementById('enter-btn');
+const statusEl = document.getElementById('login-status');
+
+nickInput.focus();
+nickInput.addEventListener('keydown', e => { if (e.key === 'Enter') enterBtn.click(); });
+
+enterBtn.addEventListener('click', async () => {
+  const name = nickInput.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+  if (!name || name.length < 2) {
+    statusEl.textContent = 'nickname must be 2+ alphanumeric chars';
+    statusEl.className = 'status err';
+    return;
+  }
+  if (!CONFIG_OK) {
+    statusEl.textContent = 'firebase not configured — see README.md';
+    statusEl.className = 'status err';
+    return;
+  }
+  enterBtn.disabled = true;
+  statusEl.textContent = 'connecting…';
+  statusEl.className = 'status';
+  try {
+    await enterWorld(name);
+  } catch (e) {
+    console.error(e);
+    statusEl.textContent = 'failed: ' + (e.message || 'unknown');
+    statusEl.className = 'status err';
+    enterBtn.disabled = false;
+  }
+});
+
+async function enterWorld(name) {
+  // 1. Fetch or create world seed
+  const seedRef = ref(db, 'world/seed');
+  const seedSnap = await get(seedRef);
+  if (seedSnap.exists()) {
+    worldSeed = seedSnap.val();
+  } else {
+    worldSeed = Math.floor(Math.random() * 2_000_000_000);
+    await set(seedRef, worldSeed);
+  }
+  world = generateWorld(worldSeed);
+  document.getElementById('s-seed').textContent = worldSeed;
+
+  // 2. Check concurrent players
+  const onlineSnap = await get(ref(db, 'online'));
+  const onlineCount = onlineSnap.exists() ? Object.keys(onlineSnap.val()).length : 0;
+  const exists = onlineSnap.exists() ? onlineSnap.val()[name] : null;
+  if (!exists && onlineCount >= MAX_PLAYERS) {
+    throw new Error(`server full (${MAX_PLAYERS} max)`);
+  }
+
+  // 3. Load or create player
+  const playerRef = ref(db, `players/${name}`);
+  const pSnap = await get(playerRef);
+  if (pSnap.exists()) {
+    me = pSnap.val();
+    me.name = name;
+  } else {
+    // Find a walkable spawn near center
+    let sx = 25, sy = 25, tries = 0;
+    while (tries < 100 && !BIOMES[world[sy][sx].biome].walkable) {
+      sx = 20 + Math.floor(Math.random() * 10);
+      sy = 20 + Math.floor(Math.random() * 10);
+      tries++;
+    }
+    me = {
+      name, x: sx, y: sy,
+      hp: 100, maxHp: 100,
+      gold: 0, lvl: 1, xp: 0,
+      inv: {}, tools: {},
+      creatures: []
+    };
+    await set(playerRef, { ...me });
+  }
+
+  // 4. Mark online + set disconnect cleanup
+  const onRef = ref(db, `online/${name}`);
+  await set(onRef, { at: serverTimestamp() });
+  onDisconnect(onRef).remove();
+
+  // 5. Subscribe to world state
+  setupListeners();
+
+  // 6. Show game
+  loginEl.style.display = 'none';
+  gameEl.classList.add('active');
+  document.getElementById('brand-name').textContent = name;
+  fitCanvas();
+  log(`welcome, ${name} — ${onlineCount + (exists ? 0 : 1)}/5 online`, 'system');
+  startGameLoop();
+}
+
+// ============================================================
+// FIREBASE LISTENERS
+// ============================================================
+function setupListeners() {
+  // online count + other players' lightweight state
+  onValue(ref(db, 'online'), snap => {
+    const val = snap.val() || {};
+    document.getElementById('s-online').textContent = Object.keys(val).length;
+  });
+
+  // all players (for rendering others' positions)
+  onValue(ref(db, 'players'), snap => {
+    const val = snap.val() || {};
+    otherPlayers = {};
+    for (const [k, v] of Object.entries(val)) {
+      if (k !== me.name) otherPlayers[k] = v;
+    }
+  });
+
+  // owned creatures across all players (for rendering, filter mine)
+  onValue(ref(db, 'creatures'), snap => {
+    const val = snap.val() || {};
+    ownedCreatures = {};
+    for (const [k, v] of Object.entries(val)) {
+      if (v.owner === me.name) ownedCreatures[k] = { ...v, id: k };
+    }
+    renderCreaturesTab();
+  });
+
+  // buildings
+  onValue(ref(db, 'buildings'), snap => {
+    buildings = snap.val() || {};
+    renderBuildingsTab();
+  });
+
+  // depleted resources (respawn timers)
+  onValue(ref(db, 'depleted'), snap => {
+    depletedResources = snap.val() || {};
+  });
+}
+
+// ============================================================
+// RENDERING
+// ============================================================
+function fitCanvas() {
+  const wrap = document.getElementById('world-wrap');
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  canvas.width = w;
+  canvas.height = h;
+  // Dynamic tile size: aim for ~VIEW_TILES across, min 16px
+  const size = Math.max(18, Math.min(40, Math.floor(Math.min(w, h) / VIEW_TILES)));
+  tilePx = size;
+}
+
+window.addEventListener('resize', () => { if (me) fitCanvas(); });
+
+function render() {
+  if (!world || !me) return;
+  const w = canvas.width, h = canvas.height;
+  const cols = Math.ceil(w / tilePx) + 1;
+  const rows = Math.ceil(h / tilePx) + 1;
+  const originX = me.x - Math.floor(cols / 2);
+  const originY = me.y - Math.floor(rows / 2);
+
+  ctx.fillStyle = '#0a0e0c';
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.font = `${tilePx * 0.7}px 'JetBrains Mono', monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // draw terrain
+  for (let ry = 0; ry < rows; ry++) {
+    for (let rx = 0; rx < cols; rx++) {
+      const wx = originX + rx;
+      const wy = originY + ry;
+      const px = rx * tilePx;
+      const py = ry * tilePx;
+      if (wx < 0 || wy < 0 || wx >= WORLD_SIZE || wy >= WORLD_SIZE) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(px, py, tilePx, tilePx);
+        continue;
+      }
+      const tile = world[wy][wx];
+      const biome = BIOMES[tile.biome];
+      // Checkerboard shading for depth
+      const shade = ((wx + wy) % 2 === 0) ? biome.color : biome.colorLite;
+      ctx.fillStyle = shade;
+      ctx.fillRect(px, py, tilePx, tilePx);
+
+      // terrain glyph (subtle)
+      ctx.fillStyle = 'rgba(200,180,140,0.15)';
+      ctx.fillText(biome.glyph, px + tilePx/2, py + tilePx/2);
+
+      // resource (not depleted)
+      const depKey = `${wx}_${wy}`;
+      const isDepleted = depletedResources[depKey] && depletedResources[depKey] > Date.now();
+      if (tile.resource && !isDepleted) {
+        ctx.fillStyle = '#fff';
+        ctx.fillText(RESOURCES[tile.resource].glyph, px + tilePx/2, py + tilePx/2);
+      }
+    }
+  }
+
+  // draw buildings
+  for (const [id, b] of Object.entries(buildings)) {
+    if (b.x < originX || b.x >= originX + cols || b.y < originY || b.y >= originY + rows) continue;
+    const px = (b.x - originX) * tilePx;
+    const py = (b.y - originY) * tilePx;
+    ctx.fillStyle = 'rgba(255,179,71,0.15)';
+    ctx.fillRect(px, py, tilePx, tilePx);
+    ctx.fillText(BUILDINGS[b.type].icon, px + tilePx/2, py + tilePx/2);
+    // health bar for low-hp buildings
+    if (b.hp < BUILDINGS[b.type].hp) {
+      const pct = b.hp / BUILDINGS[b.type].hp;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(px + 2, py + tilePx - 5, tilePx - 4, 3);
+      ctx.fillStyle = pct > 0.5 ? '#7cbd56' : pct > 0.25 ? '#ffb347' : '#d35454';
+      ctx.fillRect(px + 2, py + tilePx - 5, (tilePx - 4) * pct, 3);
+    }
+  }
+
+  // draw wild creatures
+  for (const c of wildCreatures) {
+    if (c.x < originX || c.x >= originX + cols || c.y < originY || c.y >= originY + rows) continue;
+    const px = (c.x - originX) * tilePx;
+    const py = (c.y - originY) * tilePx;
+    ctx.fillText(SPECIES[c.species].glyph, px + tilePx/2, py + tilePx/2);
+  }
+
+  // draw other players
+  for (const [name, p] of Object.entries(otherPlayers)) {
+    if (p.x < originX || p.x >= originX + cols || p.y < originY || p.y >= originY + rows) continue;
+    const px = (p.x - originX) * tilePx;
+    const py = (p.y - originY) * tilePx;
+    ctx.fillStyle = 'rgba(106,176,196,0.25)';
+    ctx.fillRect(px, py, tilePx, tilePx);
+    ctx.fillStyle = '#6ab0c4';
+    ctx.font = `${tilePx * 0.7}px 'JetBrains Mono', monospace`;
+    ctx.fillText('🧍', px + tilePx/2, py + tilePx/2);
+    // name tag
+    ctx.font = `bold 10px 'JetBrains Mono', monospace`;
+    ctx.fillStyle = '#6ab0c4';
+    ctx.fillText(name, px + tilePx/2, py - 2);
+    ctx.font = `${tilePx * 0.7}px 'JetBrains Mono', monospace`;
+  }
+
+  // draw me (centered)
+  const meX = (me.x - originX) * tilePx;
+  const meY = (me.y - originY) * tilePx;
+  ctx.fillStyle = 'rgba(255,179,71,0.25)';
+  ctx.fillRect(meX, meY, tilePx, tilePx);
+  ctx.strokeStyle = '#ffb347';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(meX + 1, meY + 1, tilePx - 2, tilePx - 2);
+  ctx.fillStyle = '#fff';
+  ctx.fillText('🧍', meX + tilePx/2, meY + tilePx/2);
+
+  // place-building overlay
+  if (placingBuilding) {
+    ctx.strokeStyle = 'rgba(124,189,86,0.6)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    const adjTiles = [[me.x, me.y-1],[me.x, me.y+1],[me.x-1, me.y],[me.x+1, me.y]];
+    for (const [ax, ay] of adjTiles) {
+      if (ax < originX || ax >= originX + cols || ay < originY || ay >= originY + rows) continue;
+      const ok = canPlaceHere(ax, ay);
+      ctx.strokeStyle = ok ? 'rgba(124,189,86,0.7)' : 'rgba(211,84,84,0.7)';
+      ctx.strokeRect((ax - originX) * tilePx + 2, (ay - originY) * tilePx + 2, tilePx - 4, tilePx - 4);
+    }
+    ctx.setLineDash([]);
+  }
+
+  renderMinimap();
+  updateHud();
+}
+
+function renderMinimap() {
+  const size = miniCanvas.width;
+  const scale = size / WORLD_SIZE;
+  for (let y = 0; y < WORLD_SIZE; y++) {
+    for (let x = 0; x < WORLD_SIZE; x++) {
+      miniCtx.fillStyle = BIOMES[world[y][x].biome].color;
+      miniCtx.fillRect(x * scale, y * scale, scale + 1, scale + 1);
+    }
+  }
+  // other players
+  for (const p of Object.values(otherPlayers)) {
+    miniCtx.fillStyle = '#6ab0c4';
+    miniCtx.fillRect(p.x * scale - 1, p.y * scale - 1, 3, 3);
+  }
+  // buildings
+  for (const b of Object.values(buildings)) {
+    miniCtx.fillStyle = b.owner === me.name ? '#ffb347' : '#d35454';
+    miniCtx.fillRect(b.x * scale, b.y * scale, 2, 2);
+  }
+  // me
+  miniCtx.fillStyle = '#ffb347';
+  miniCtx.fillRect(me.x * scale - 2, me.y * scale - 2, 5, 5);
+  // viewport box
+  miniCtx.strokeStyle = 'rgba(255,179,71,0.6)';
+  miniCtx.lineWidth = 1;
+  const viewW = Math.min(WORLD_SIZE, Math.ceil(canvas.width / tilePx)) * scale;
+  const viewH = Math.min(WORLD_SIZE, Math.ceil(canvas.height / tilePx)) * scale;
+  miniCtx.strokeRect(me.x * scale - viewW/2, me.y * scale - viewH/2, viewW, viewH);
+}
+
+function updateHud() {
+  const biome = world[me.y][me.x].biome;
+  document.getElementById('hud-hp').textContent = `${me.hp}/${me.maxHp}`;
+  document.getElementById('hud-gold').textContent = me.gold;
+  document.getElementById('hud-pos').textContent = `${me.x},${me.y}`;
+  document.getElementById('hud-biome').textContent = BIOMES[biome].name;
+  // stats tab mirrors
+  document.getElementById('s-hp').textContent = `${me.hp}/${me.maxHp}`;
+  document.getElementById('s-lvl').textContent = me.lvl;
+  document.getElementById('s-xp').textContent = `${me.xp}/${me.lvl * 100}`;
+  document.getElementById('s-gold').textContent = me.gold;
+  document.getElementById('s-pos').textContent = `${me.x},${me.y}`;
+  document.getElementById('s-biome').textContent = BIOMES[biome].name;
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+document.addEventListener('keydown', e => {
+  if (document.activeElement?.tagName === 'INPUT') return;
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === ' ') { e.preventDefault(); interactAtPlayer(); }
+  if (e.key === 'Tab') { e.preventDefault(); cycleTab(); }
+});
+document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+// dpad
+document.querySelectorAll('.dpad-btn[data-dir]').forEach(btn => {
+  const dir = btn.dataset.dir;
+  const handler = (e) => {
+    e.preventDefault();
+    if (dir === 'up') tryMove(0, -1);
+    else if (dir === 'down') tryMove(0, 1);
+    else if (dir === 'left') tryMove(-1, 0);
+    else if (dir === 'right') tryMove(1, 0);
+    else if (dir === 'act') interactAtPlayer();
+  };
+  btn.addEventListener('touchstart', handler, { passive: false });
+  btn.addEventListener('click', handler);
+});
+
+// canvas click to interact
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  const cols = Math.ceil(canvas.width / tilePx) + 1;
+  const rows = Math.ceil(canvas.height / tilePx) + 1;
+  const originX = me.x - Math.floor(cols / 2);
+  const originY = me.y - Math.floor(rows / 2);
+  const tx = Math.floor(cx / tilePx) + originX;
+  const ty = Math.floor(cy / tilePx) + originY;
+
+  if (placingBuilding) {
+    tryPlaceBuilding(tx, ty);
+    return;
+  }
+
+  // only interact if adjacent or on player tile
+  const dist = Math.max(Math.abs(tx - me.x), Math.abs(ty - me.y));
+  if (dist > 1) {
+    log(`too far — move closer`, 'info');
+    return;
+  }
+  interactAt(tx, ty);
+});
+
+function interactAtPlayer() {
+  interactAt(me.x, me.y);
+  // also check all 4 adj
+  const adj = [[me.x, me.y-1],[me.x, me.y+1],[me.x-1, me.y],[me.x+1, me.y]];
+  for (const [x, y] of adj) {
+    // prefer creatures
+    const c = wildCreatures.find(c => c.x === x && c.y === y);
+    if (c) { initiateCombat(c); return; }
+  }
+}
+
+function interactAt(x, y) {
+  if (x < 0 || y < 0 || x >= WORLD_SIZE || y >= WORLD_SIZE) return;
+  // creature?
+  const c = wildCreatures.find(c => c.x === x && c.y === y);
+  if (c) { initiateCombat(c); return; }
+  // building of mine?
+  const bEntry = Object.entries(buildings).find(([id, b]) => b.x === x && b.y === y);
+  if (bEntry) { openBuilding(bEntry[0], bEntry[1]); return; }
+  // resource?
+  const tile = world[y][x];
+  const depKey = `${x}_${y}`;
+  if (tile.resource && !(depletedResources[depKey] && depletedResources[depKey] > Date.now())) {
+    gatherResource(x, y, tile.resource);
+    return;
+  }
+  log(`nothing here.`, 'info');
+}
+
+// ============================================================
+// MOVEMENT
+// ============================================================
+function tryMove(dx, dy) {
+  const now = performance.now();
+  if (now - lastMoveTime < MOVE_COOLDOWN) return;
+  lastMoveTime = now;
+  const nx = me.x + dx, ny = me.y + dy;
+  if (nx < 0 || ny < 0 || nx >= WORLD_SIZE || ny >= WORLD_SIZE) return;
+  const tile = world[ny][nx];
+  if (!BIOMES[tile.biome].walkable) { log(`can't walk on ${BIOMES[tile.biome].name}`, 'info'); return; }
+  // blocked by non-walkable buildings
+  const blocking = Object.values(buildings).find(b => b.x === nx && b.y === ny && !BUILDINGS[b.type].walkable);
+  if (blocking) { log(`blocked by ${BUILDINGS[blocking.type].name}`, 'info'); return; }
+  me.x = nx; me.y = ny;
+  update(ref(db, `players/${me.name}`), { x: nx, y: ny });
+}
+
+// ============================================================
+// RESOURCE GATHERING
+// ============================================================
+async function gatherResource(x, y, resKey) {
+  const res = RESOURCES[resKey];
+  // tool bonus
+  const hasMatchingTool = Object.keys(me.tools || {}).some(t => ITEMS[t]?.bonus === res.drops);
+  const amt = res.amount + (hasMatchingTool ? 1 : 0);
+  me.inv[res.drops] = (me.inv[res.drops] || 0) + amt;
+  log(`+${amt} ${ITEMS[res.drops].name}`, 'good');
+  // deplete
+  const depKey = `${x}_${y}`;
+  await update(ref(db, `depleted`), { [depKey]: Date.now() + RESPAWN_MS });
+  await update(ref(db, `players/${me.name}`), { inv: me.inv });
+  renderInvTab();
+}
+
+// ============================================================
+// COMBAT
+// ============================================================
+function initiateCombat(wildCreature) {
+  const sp = SPECIES[wildCreature.species];
+  const lvl = wildCreature.lvl;
+  const enemy = {
+    species: wildCreature.species,
+    lvl,
+    hp: Math.floor(sp.base.hp * (1 + lvl * 0.15)),
+    maxHp: Math.floor(sp.base.hp * (1 + lvl * 0.15)),
+    atk: Math.floor(sp.base.atk * (1 + lvl * 0.12)),
+    def: Math.floor(sp.base.def * (1 + lvl * 0.10)),
+    spd: sp.base.spd,
+  };
+  combatState = { enemy, wildId: wildCreature.id, wild: wildCreature, log: [] };
+  openCombatModal();
+}
+
+function playerStats() {
+  let atk = 8 + me.lvl * 2;
+  let def = 4 + me.lvl;
+  if (me.tools?.stone_sword) atk += 10;
+  if (me.tools?.leather_armor) def += 8;
+  return { atk, def, spd: 20 };
+}
+
+function openCombatModal() {
+  const { enemy, log: cLog } = combatState;
+  const sp = SPECIES[enemy.species];
+  const ps = playerStats();
+  const body = `
+    <div class="combat-arena">
+      <div class="combat-side">
+        <div class="combat-sprite">🧍</div>
+        <div class="combat-name">${me.name}</div>
+        <div class="combat-lvl">LV ${me.lvl}</div>
+        <div class="combat-hp-label">HP</div>
+        <div class="bar"><div class="bar-fill hp" style="transform:scaleX(${me.hp/me.maxHp})"></div></div>
+        <div style="font-size:10px;color:var(--text-dim)">
+          ATK ${ps.atk} · DEF ${ps.def} · SPD ${ps.spd}
+        </div>
+      </div>
+      <div class="combat-vs">VS</div>
+      <div class="combat-side">
+        <div class="combat-sprite">${sp.glyph}</div>
+        <div class="combat-name">Wild ${sp.name}</div>
+        <div class="combat-lvl">LV ${enemy.lvl}</div>
+        <div class="combat-hp-label">HP</div>
+        <div class="bar"><div class="bar-fill hp" style="transform:scaleX(${enemy.hp/enemy.maxHp})"></div></div>
+        <div style="font-size:10px;color:var(--text-dim)">
+          ATK ${enemy.atk} · DEF ${enemy.def} · SPD ${enemy.spd}
+        </div>
+      </div>
+    </div>
+    <div id="combat-log">${cLog.map(l => `<div>${l}</div>`).join('')}</div>
+    <div class="combat-actions">
+      <button class="btn primary" onclick="window.__combatAction('attack')">⚔ Attack</button>
+      <button class="btn" onclick="window.__combatAction('tame')" ${me.tools?.tame_net ? '' : 'disabled'}>🕸 Tame Net${me.tools?.tame_net ? ' ('+me.tools.tame_net+')' : ''}</button>
+      <button class="btn" onclick="window.__combatAction('item')" disabled>🧪 Item</button>
+      <button class="btn danger" onclick="window.__combatAction('flee')">🏃 Flee</button>
+    </div>
+  `;
+  openModal(`Wild ${sp.name} · LV ${enemy.lvl}`, body, []);
+}
+
+window.__combatAction = (action) => {
+  const { enemy } = combatState;
+  const ps = playerStats();
+  const sp = SPECIES[enemy.species];
+
+  if (action === 'flee') {
+    if (Math.random() < 0.7 || ps.spd >= enemy.spd) {
+      combatState.log.push(`<span class="log-info">You fled.</span>`);
+      log(`fled from wild ${sp.name}`, 'info');
+      closeModal();
+      combatState = null;
+    } else {
+      combatState.log.push(`<span class="log-bad">Couldn't escape!</span>`);
+      enemyTurn();
+    }
+    return;
+  }
+
+  if (action === 'attack') {
+    // player goes first if spd >= enemy spd
+    if (ps.spd >= enemy.spd) {
+      playerHit();
+      if (enemy.hp > 0) enemyTurn();
+    } else {
+      enemyTurn();
+      if (me.hp > 0) playerHit();
+    }
+    postCombatCheck();
+    return;
+  }
+
+  if (action === 'tame') {
+    if (!me.tools?.tame_net || me.tools.tame_net <= 0) return;
+    me.tools.tame_net--;
+    if (me.tools.tame_net <= 0) delete me.tools.tame_net;
+    // catch rate: based on enemy hp %, lower = easier
+    const hpFrac = enemy.hp / enemy.maxHp;
+    const catchRate = Math.max(0.08, 0.9 - hpFrac * 0.7);
+    const ownedCount = Object.keys(ownedCreatures).length;
+    if (ownedCount >= MAX_CREATURES_OWNED) {
+      combatState.log.push(`<span class="log-bad">Creature slots full!</span>`);
+      openCombatModal();
+      return;
+    }
+    if (Math.random() < catchRate) {
+      // Caught — persist to DB with rolled IVs
+      const cid = push(child(ref(db), 'creatures')).key;
+      const ivs = {
+        hp: Math.floor(Math.random() * 32),
+        atk: Math.floor(Math.random() * 32),
+        def: Math.floor(Math.random() * 32),
+        spd: Math.floor(Math.random() * 32),
+      };
+      const critter = {
+        species: enemy.species,
+        owner: me.name,
+        lvl: enemy.lvl,
+        xp: 0,
+        hp: enemy.maxHp,
+        maxHp: enemy.maxHp,
+        ivs,
+        traits: [],
+        caughtAt: Date.now(),
+      };
+      set(ref(db, `creatures/${cid}`), critter);
+      combatState.log.push(`<span class="log-good">✓ Caught ${sp.name}!</span>`);
+      log(`tamed wild ${sp.name} LV ${enemy.lvl}`, 'good');
+      update(ref(db, `players/${me.name}`), { tools: me.tools });
+      // remove wild creature from this session (will respawn next time bucket)
+      wildCreatures = wildCreatures.filter(c => c.id !== combatState.wildId);
+      closeModal();
+      combatState = null;
+      return;
+    } else {
+      combatState.log.push(`<span class="log-bad">${sp.name} broke free!</span>`);
+      update(ref(db, `players/${me.name}`), { tools: me.tools });
+      enemyTurn();
+      postCombatCheck();
+      return;
+    }
+  }
+};
+
+function playerHit() {
+  const ps = playerStats();
+  const base = Math.max(1, ps.atk - combatState.enemy.def / 2);
+  const dmg = Math.floor(base * (0.85 + Math.random() * 0.3));
+  combatState.enemy.hp = Math.max(0, combatState.enemy.hp - dmg);
+  combatState.log.push(`<span class="log-good">You hit for ${dmg}</span>`);
+}
+
+function enemyTurn() {
+  const ps = playerStats();
+  const base = Math.max(1, combatState.enemy.atk - ps.def / 2);
+  const dmg = Math.floor(base * (0.85 + Math.random() * 0.3));
+  me.hp = Math.max(0, me.hp - dmg);
+  combatState.log.push(`<span class="log-bad">${SPECIES[combatState.enemy.species].name} hit you for ${dmg}</span>`);
+  update(ref(db, `players/${me.name}`), { hp: me.hp });
+}
+
+function postCombatCheck() {
+  if (combatState.enemy.hp <= 0) {
+    const goldDrop = 5 + combatState.enemy.lvl * 3;
+    const xpGain = 20 + combatState.enemy.lvl * 10;
+    me.gold += goldDrop;
+    me.xp += xpGain;
+    // level up?
+    while (me.xp >= me.lvl * 100) {
+      me.xp -= me.lvl * 100;
+      me.lvl++;
+      me.maxHp += 10;
+      me.hp = me.maxHp;
+      log(`LEVEL UP — now level ${me.lvl}`, 'system');
+    }
+    log(`defeated ${SPECIES[combatState.enemy.species].name} · +${goldDrop}g +${xpGain}xp`, 'good');
+    update(ref(db, `players/${me.name}`), { gold: me.gold, xp: me.xp, lvl: me.lvl, maxHp: me.maxHp, hp: me.hp });
+    wildCreatures = wildCreatures.filter(c => c.id !== combatState.wildId);
+    closeModal();
+    combatState = null;
+    return;
+  }
+  if (me.hp <= 0) {
+    log(`you died — respawning`, 'bad');
+    me.hp = Math.floor(me.maxHp * 0.5);
+    me.x = 25; me.y = 25;
+    // drop inventory (per spec)
+    me.inv = {};
+    update(ref(db, `players/${me.name}`), { hp: me.hp, x: me.x, y: me.y, inv: me.inv });
+    closeModal();
+    combatState = null;
+    renderInvTab();
+    return;
+  }
+  openCombatModal();
+}
+
+// ============================================================
+// CRAFTING
+// ============================================================
+function renderCraftTab() {
+  const el = document.getElementById('recipes');
+  el.innerHTML = '';
+  for (const r of RECIPES) {
+    const out = ITEMS[r.out];
+    const costParts = Object.entries(r.req).map(([k, v]) => {
+      const have = me.inv[k] || 0;
+      const cls = have >= v ? 'have' : 'need';
+      return `<span class="${cls}">${v} ${ITEMS[k].name}</span>`;
+    }).join(' · ');
+    const canCraft = Object.entries(r.req).every(([k, v]) => (me.inv[k] || 0) >= v);
+    const div = document.createElement('div');
+    div.className = 'recipe' + (canCraft ? '' : ' disabled');
+    div.innerHTML = `
+      <div class="head">
+        <span><span class="icon">${out.icon}</span> ${out.name} ×${r.qty}</span>
+        <span style="color:${canCraft ? 'var(--green)' : 'var(--red)'}">${canCraft ? '✓' : '✕'}</span>
+      </div>
+      <div class="cost">${costParts}</div>
+    `;
+    if (canCraft) div.addEventListener('click', () => craft(r));
+    el.appendChild(div);
+  }
+}
+
+function craft(recipe) {
+  // deduct
+  for (const [k, v] of Object.entries(recipe.req)) {
+    me.inv[k] -= v;
+    if (me.inv[k] <= 0) delete me.inv[k];
+  }
+  // add output
+  const out = ITEMS[recipe.out];
+  if (out.consumable || !out.tool) {
+    me.tools[recipe.out] = (me.tools[recipe.out] || 0) + recipe.qty;
+  } else {
+    me.tools[recipe.out] = 1; // unique tool
+  }
+  log(`crafted ${out.name} ×${recipe.qty}`, 'good');
+  update(ref(db, `players/${me.name}`), { inv: me.inv, tools: me.tools });
+  renderCraftTab();
+  renderInvTab();
+}
+
+// ============================================================
+// BUILDING
+// ============================================================
+function renderBuildTab() {
+  const el = document.getElementById('buildings');
+  el.innerHTML = '';
+  for (const [key, b] of Object.entries(BUILDINGS)) {
+    const costParts = Object.entries(b.req).map(([k, v]) => {
+      const have = me.inv[k] || 0;
+      const cls = have >= v ? 'have' : 'need';
+      return `<span class="${cls}">${v} ${ITEMS[k].name}</span>`;
+    }).join(' · ');
+    const canBuild = Object.entries(b.req).every(([k, v]) => (me.inv[k] || 0) >= v);
+    const div = document.createElement('div');
+    div.className = 'build-opt' + (canBuild ? '' : ' disabled');
+    div.innerHTML = `
+      <div class="head"><span><span class="icon">${b.icon}</span> ${b.name}</span><span style="font-size:10px;color:var(--text-dim)">HP ${b.hp}</span></div>
+      <div class="cost">${costParts}</div>
+    `;
+    if (canBuild) div.addEventListener('click', () => startPlacing(key));
+    el.appendChild(div);
+  }
+  // my bases
+  const mine = Object.entries(buildings).filter(([, b]) => b.owner === me.name);
+  const basesEl = document.getElementById('my-bases');
+  if (mine.length === 0) {
+    basesEl.innerHTML = '<div style="color:var(--text-faded);font-style:italic">no structures yet</div>';
+  } else {
+    basesEl.innerHTML = mine.map(([id, b]) =>
+      `<div style="padding:4px 0;border-bottom:1px solid var(--border)">${BUILDINGS[b.type].icon} ${BUILDINGS[b.type].name} @ ${b.x},${b.y} · ${b.hp}/${BUILDINGS[b.type].hp} HP</div>`
+    ).join('');
+  }
+}
+
+function startPlacing(type) {
+  placingBuilding = type;
+  log(`click adjacent tile to place ${BUILDINGS[type].name} · esc to cancel`, 'system');
+}
+
+function canPlaceHere(x, y) {
+  if (x < 0 || y < 0 || x >= WORLD_SIZE || y >= WORLD_SIZE) return false;
+  const dx = Math.abs(x - me.x), dy = Math.abs(y - me.y);
+  if (dx + dy !== 1) return false;
+  const tile = world[y][x];
+  if (!BIOMES[tile.biome].walkable) return false;
+  if (tile.biome === 'water') return false;
+  if (Object.values(buildings).some(b => b.x === x && b.y === y)) return false;
+  return true;
+}
+
+async function tryPlaceBuilding(x, y) {
+  if (!placingBuilding) return;
+  if (!canPlaceHere(x, y)) { log(`can't place there`, 'bad'); return; }
+  const b = BUILDINGS[placingBuilding];
+  for (const [k, v] of Object.entries(b.req)) {
+    me.inv[k] -= v;
+    if (me.inv[k] <= 0) delete me.inv[k];
+  }
+  const id = push(child(ref(db), 'buildings')).key;
+  await set(ref(db, `buildings/${id}`), {
+    type: placingBuilding, x, y, owner: me.name, hp: b.hp, built: Date.now()
+  });
+  await update(ref(db, `players/${me.name}`), { inv: me.inv });
+  log(`built ${b.name} @ ${x},${y}`, 'good');
+  placingBuilding = null;
+  renderBuildTab();
+  renderInvTab();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && placingBuilding) {
+    placingBuilding = null;
+    log(`canceled building`, 'info');
+  }
+});
+
+// ============================================================
+// BUILDING INTERACTION
+// ============================================================
+function openBuilding(id, b) {
+  if (b.type === 'storage' && b.owner === me.name) {
+    openStorage(id, b);
+  } else if (b.type === 'bench' && b.owner === me.name) {
+    switchTab('craft');
+    log(`using stone workbench`, 'info');
+  } else if (b.owner !== me.name) {
+    confirmAttackBuilding(id, b);
+  } else {
+    log(`${BUILDINGS[b.type].name}`, 'info');
+  }
+}
+
+function openStorage(id, b) {
+  const stored = b.contents || {};
+  const allItems = { ...me.inv, ...me.tools };
+  const body = `
+    <div class="section-title">Inventory → Storage</div>
+    <div class="inv-grid" id="inv-side"></div>
+    <div class="section-title" style="margin-top:12px">Storage</div>
+    <div class="inv-grid" id="stor-side"></div>
+  `;
+  openModal('Storage Box', body, [{ label: 'Close', action: closeModal }]);
+  const invSide = document.getElementById('inv-side');
+  const storSide = document.getElementById('stor-side');
+  const renderSlots = () => {
+    invSide.innerHTML = '';
+    storSide.innerHTML = '';
+    const myAll = { ...me.inv };
+    for (const [k, v] of Object.entries(myAll)) {
+      const s = document.createElement('div');
+      s.className = 'inv-slot';
+      s.innerHTML = `<span class="count">${v}</span><div class="icon">${ITEMS[k].icon}</div><div class="name">${ITEMS[k].name}</div>`;
+      s.addEventListener('click', async () => {
+        me.inv[k]--;
+        if (me.inv[k] <= 0) delete me.inv[k];
+        const nc = { ...(b.contents || {}) };
+        nc[k] = (nc[k] || 0) + 1;
+        b.contents = nc;
+        await update(ref(db, `buildings/${id}`), { contents: nc });
+        await update(ref(db, `players/${me.name}`), { inv: me.inv });
+        renderSlots();
+        renderInvTab();
+      });
+      invSide.appendChild(s);
+    }
+    for (const [k, v] of Object.entries(b.contents || {})) {
+      const s = document.createElement('div');
+      s.className = 'inv-slot';
+      s.innerHTML = `<span class="count">${v}</span><div class="icon">${ITEMS[k].icon}</div><div class="name">${ITEMS[k].name}</div>`;
+      s.addEventListener('click', async () => {
+        const nc = { ...(b.contents || {}) };
+        nc[k]--;
+        if (nc[k] <= 0) delete nc[k];
+        b.contents = nc;
+        me.inv[k] = (me.inv[k] || 0) + 1;
+        await update(ref(db, `buildings/${id}`), { contents: nc });
+        await update(ref(db, `players/${me.name}`), { inv: me.inv });
+        renderSlots();
+        renderInvTab();
+      });
+      storSide.appendChild(s);
+    }
+    if (!Object.keys(me.inv).length) invSide.innerHTML = '<div class="empty-state">inventory empty</div>';
+    if (!Object.keys(b.contents || {}).length) storSide.innerHTML = '<div class="empty-state">storage empty</div>';
+  };
+  renderSlots();
+}
+
+function confirmAttackBuilding(id, b) {
+  const body = `
+    <div style="padding:10px 0">This is <b style="color:var(--red)">${b.owner}</b>'s ${BUILDINGS[b.type].name}.</div>
+    <div style="color:var(--text-dim);font-size:11px">Attack to damage it. Destroy to loot contents if any.</div>
+    <div style="margin-top:12px">HP: <b style="color:${b.hp < BUILDINGS[b.type].hp/2 ? 'var(--red)' : 'var(--amber)'}">${b.hp}/${BUILDINGS[b.type].hp}</b></div>
+  `;
+  openModal('⚔ Enemy Structure', body, [
+    { label: 'Attack (-10 HP)', action: () => attackBuilding(id, b), danger: true },
+    { label: 'Leave', action: closeModal },
+  ]);
+}
+
+async function attackBuilding(id, b) {
+  const dmg = 10 + (me.tools?.stone_sword ? 8 : 0);
+  const newHp = b.hp - dmg;
+  if (newHp <= 0) {
+    // destroyed — loot contents
+    const loot = b.contents || {};
+    for (const [k, v] of Object.entries(loot)) {
+      me.inv[k] = (me.inv[k] || 0) + v;
+    }
+    await update(ref(db, `players/${me.name}`), { inv: me.inv });
+    await remove(ref(db, `buildings/${id}`));
+    log(`destroyed ${b.owner}'s ${BUILDINGS[b.type].name} · looted ${Object.keys(loot).length} items`, 'good');
+    renderInvTab();
+    closeModal();
+  } else {
+    await update(ref(db, `buildings/${id}`), { hp: newHp });
+    log(`hit ${b.owner}'s ${BUILDINGS[b.type].name} for ${dmg}`, 'info');
+    b.hp = newHp;
+    confirmAttackBuilding(id, b);
+  }
+}
+
+// ============================================================
+// INVENTORY RENDER
+// ============================================================
+function renderInvTab() {
+  const resEl = document.getElementById('inv-resources');
+  const toolEl = document.getElementById('inv-tools');
+  const resKeys = ['wood','stone','copper','iron','food'];
+  const toolKeys = Object.keys(ITEMS).filter(k => ITEMS[k].tool);
+  const fillGrid = (el, keys, source) => {
+    el.innerHTML = '';
+    for (const k of keys) {
+      const v = source[k] || 0;
+      const slot = document.createElement('div');
+      slot.className = 'inv-slot' + (v === 0 ? ' empty' : '');
+      slot.innerHTML = `<span class="count">${v}</span><div class="icon">${ITEMS[k].icon}</div><div class="name">${ITEMS[k].name}</div>`;
+      el.appendChild(slot);
+    }
+  };
+  fillGrid(resEl, resKeys, me.inv || {});
+  fillGrid(toolEl, toolKeys, me.tools || {});
+}
+
+// ============================================================
+// CREATURES TAB
+// ============================================================
+function renderCreaturesTab() {
+  const el = document.getElementById('crit-list');
+  const list = Object.values(ownedCreatures);
+  document.getElementById('crit-count').textContent = list.length;
+  if (list.length === 0) {
+    el.innerHTML = '<div class="empty-state">no creatures tamed yet<br>craft a Tame Net and find a wild one</div>';
+    return;
+  }
+  el.innerHTML = '';
+  for (const c of list) {
+    const sp = SPECIES[c.species];
+    const card = document.createElement('div');
+    card.className = 'creature-card';
+    const totalIVs = Object.values(c.ivs || {}).reduce((a,b)=>a+b,0);
+    card.innerHTML = `
+      <div class="sprite">${sp.glyph}</div>
+      <div class="info">
+        <div class="row-1"><span class="species">${sp.name}</span><span class="lvl">LV ${c.lvl}</span></div>
+        <div class="stats-mini">HP ${c.hp}/${c.maxHp} · IVs ${totalIVs}/124</div>
+      </div>
+    `;
+    card.addEventListener('click', () => openCreatureDetail(c));
+    el.appendChild(card);
+  }
+}
+
+function openCreatureDetail(c) {
+  const sp = SPECIES[c.species];
+  const statAt = (base, iv) => Math.floor((base + iv) * (1 + c.lvl * 0.1));
+  const ivColor = iv => iv === 31 ? 'perfect' : '';
+  const body = `
+    <div style="display:grid;grid-template-columns:60px 1fr;gap:12px;align-items:center;padding:10px 0 14px">
+      <div style="font-size:48px;text-align:center">${sp.glyph}</div>
+      <div>
+        <div style="font-size:16px;font-weight:700;color:var(--text)">${sp.name}</div>
+        <div style="font-size:11px;color:var(--text-dim)">Level ${c.lvl} · ${c.xp || 0}/${c.lvl * 80} XP</div>
+      </div>
+    </div>
+    <div class="section-title">Stats (base + IV × level)</div>
+    <div class="stat-grid">
+      <span class="k">HP</span><span class="v">${statAt(sp.base.hp, c.ivs.hp)}</span>
+      <span class="k">ATK</span><span class="v">${statAt(sp.base.atk, c.ivs.atk)}</span>
+      <span class="k">DEF</span><span class="v">${statAt(sp.base.def, c.ivs.def)}</span>
+      <span class="k">SPD</span><span class="v">${statAt(sp.base.spd, c.ivs.spd)}</span>
+    </div>
+    <div class="section-title" style="margin-top:12px">IVs (0-31, inheritable)</div>
+    <div class="iv-grid">
+      <span class="k">HP IV</span><span class="v ${ivColor(c.ivs.hp)}">${c.ivs.hp}/31</span>
+      <span class="k">ATK IV</span><span class="v ${ivColor(c.ivs.atk)}">${c.ivs.atk}/31</span>
+      <span class="k">DEF IV</span><span class="v ${ivColor(c.ivs.def)}">${c.ivs.def}/31</span>
+      <span class="k">SPD IV</span><span class="v ${ivColor(c.ivs.spd)}">${c.ivs.spd}/31</span>
+    </div>
+  `;
+  openModal(`${sp.name} LV ${c.lvl}`, body, [
+    { label: 'Release', action: () => releaseCreature(c), danger: true },
+    { label: 'Close', action: closeModal },
+  ]);
+}
+
+async function releaseCreature(c) {
+  await remove(ref(db, `creatures/${c.id}`));
+  log(`released ${SPECIES[c.species].name}`, 'info');
+  closeModal();
+}
+
+// ============================================================
+// TABS
+// ============================================================
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => switchTab(t.dataset.tab));
+});
+
+function switchTab(name) {
+  currentTab = name;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+  document.getElementById(`tab-${name}`).style.display = 'block';
+  if (name === 'inv') renderInvTab();
+  if (name === 'crit') renderCreaturesTab();
+  if (name === 'craft') renderCraftTab();
+  if (name === 'build') renderBuildTab();
+}
+
+function cycleTab() {
+  const order = ['stats','inv','crit','craft','build'];
+  const i = order.indexOf(currentTab);
+  switchTab(order[(i + 1) % order.length]);
+}
+
+// ============================================================
+// MODAL
+// ============================================================
+function openModal(title, bodyHTML, btns = []) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = bodyHTML;
+  const btnsEl = document.getElementById('modal-btns');
+  btnsEl.innerHTML = '';
+  for (const b of btns) {
+    const btn = document.createElement('button');
+    btn.className = 'btn' + (b.primary ? ' primary' : '') + (b.danger ? ' danger' : '');
+    btn.textContent = b.label;
+    btn.addEventListener('click', b.action);
+    btnsEl.appendChild(btn);
+  }
+  document.getElementById('modal-bg').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-bg').classList.remove('open');
+  document.getElementById('modal-body').innerHTML = '';
+}
+
+document.getElementById('modal-close').addEventListener('click', () => {
+  if (combatState) return; // can't close mid-combat; must flee
+  closeModal();
+});
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+let lastWildUpdate = 0;
+function startGameLoop() {
+  function loop(ts) {
+    // continuous movement from held keys
+    if (!combatState && !placingBuilding) {
+      if (keys['w'] || keys['arrowup']) tryMove(0, -1);
+      else if (keys['s'] || keys['arrowdown']) tryMove(0, 1);
+      else if (keys['a'] || keys['arrowleft']) tryMove(-1, 0);
+      else if (keys['d'] || keys['arrowright']) tryMove(1, 0);
+    }
+
+    // wild creatures: regenerate list each 4s bucket (they "wander")
+    const bucket = Math.floor(Date.now() / CREATURE_MOVE_MS);
+    if (bucket !== lastWildUpdate) {
+      lastWildUpdate = bucket;
+      wildCreatures = getWildCreatures(worldSeed, bucket);
+    }
+
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+  renderInvTab();
+}
+
+// Keep session alive heartbeat (Firebase ondisconnect handles drops)
+setInterval(() => {
+  if (me) {
+    update(ref(db, `online/${me.name}`), { at: serverTimestamp() });
+  }
+}, 30_000);
+
+</script>
+</body>
+</html>
