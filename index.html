@@ -692,6 +692,13 @@ const ITEMS = {
   iron_pick:    { icon: '⛏️', name: 'Iron Pick',    tool: true, toolType: 'pick',   tier: 3, bonus: { resource: 'stone', amt: 3 } },
   iron_sword:   { icon: '⚔️', name: 'Iron Sword',   tool: true, toolType: 'weapon', tier: 3, bonus: { atk: 28 } },
   iron_armor:   { icon: '🛡️', name: 'Iron Armor',   tool: true, toolType: 'armor',  tier: 3, bonus: { def: 18, hp: 25 } },
+  // TRINKETS — given to creatures for permanent boosts (consume on use)
+  power_charm:  { icon: '💪', name: 'Power Charm',   trinket: true, desc: '+5 ATK IV to a creature (one-time)',  effect: { iv: 'atk', amount: 5 } },
+  guard_charm:  { icon: '🛡️', name: 'Guard Charm',   trinket: true, desc: '+5 DEF IV to a creature (one-time)',  effect: { iv: 'def', amount: 5 } },
+  swift_charm:  { icon: '💨', name: 'Swift Charm',   trinket: true, desc: '+5 SPD IV to a creature (one-time)',  effect: { iv: 'spd', amount: 5 } },
+  vital_charm:  { icon: '❤️', name: 'Vital Charm',   trinket: true, desc: '+5 HP IV to a creature (one-time)',   effect: { iv: 'hp',  amount: 5 } },
+  rare_candy:   { icon: '🍬', name: 'Rare Candy',    trinket: true, desc: 'Instantly level up a creature (+1)',   effect: { levelUp: 1 } },
+  elixir:       { icon: '🧪', name: 'Elixir',         trinket: true, desc: 'Fully restore HP + PP of a creature', effect: { fullRestore: true } },
 };
 
 // ============================================================
@@ -1067,7 +1074,10 @@ const BASE_LEVELS = {
   1: {
     name: 'Hut', size: 5, wallGlyph: '░',
     upgradeCost: { wood: 50, stone: 30, gold: 100 },
-    slots: [ { key: 'workbench', x: 2, y: 1 } ]
+    slots: [
+      { key: 'workbench', x: 1, y: 1 },
+      { key: 'bed',       x: 3, y: 1 }
+    ]
   },
   2: {
     name: 'Cabin', size: 7, wallGlyph: '▓',
@@ -1134,6 +1144,13 @@ const RECIPES = {
   iron_pick:  { name: 'Iron Pick',  icon: '⛏️', station: 'forge', tierReq: 3, cost: { wood: 12, iron: 10 }, makes: 'iron_pick' },
   iron_sword: { name: 'Iron Sword', icon: '⚔️', station: 'forge', tierReq: 3, cost: { wood: 8,  iron: 12 }, makes: 'iron_sword' },
   iron_armor: { name: 'Iron Armor', icon: '🛡️', station: 'forge', tierReq: 3, cost: { iron: 20, copper: 10 }, makes: 'iron_armor' },
+  // TRINKETS — basic at workbench, powerful at alchemy
+  power_charm: { name: 'Power Charm', icon: '💪', station: 'workbench', tierReq: 1, cost: { stone: 8, food: 5, gold: 40 },    makes: 'power_charm' },
+  guard_charm: { name: 'Guard Charm', icon: '🛡️', station: 'workbench', tierReq: 1, cost: { stone: 8, wood: 5, gold: 40 },    makes: 'guard_charm' },
+  swift_charm: { name: 'Swift Charm', icon: '💨', station: 'workbench', tierReq: 1, cost: { wood: 8, food: 5, gold: 40 },     makes: 'swift_charm' },
+  vital_charm: { name: 'Vital Charm', icon: '❤️', station: 'workbench', tierReq: 1, cost: { food: 15, gold: 40 },             makes: 'vital_charm' },
+  rare_candy:  { name: 'Rare Candy',  icon: '🍬', station: 'alchemy',   tierReq: 3, cost: { food: 20, copper: 5, gold: 150 }, makes: 'rare_candy' },
+  elixir:      { name: 'Elixir',      icon: '🧪', station: 'alchemy',   tierReq: 3, cost: { food: 10, iron: 3, gold: 100 },   makes: 'elixir' },
 };
 
 // ============================================================
@@ -1569,6 +1586,9 @@ async function attemptEnter() {
     if (baseSnap.exists()) myBase = baseSnap.val();
     else { await assignNewBase(nick); const s2 = await get(baseRef); myBase = s2.val(); }
     myBase.interiorEquipment = myBase.interiorEquipment || {};
+    // Backfill free starter equipment for any existing player who joined before this patch
+    if (!myBase.interiorEquipment.workbench) myBase.interiorEquipment.workbench = true;
+    if (!myBase.interiorEquipment.bed) myBase.interiorEquipment.bed = true;
     interiorEquipment = myBase.interiorEquipment;
 
     // Mark online + onDisconnect
@@ -1614,7 +1634,7 @@ async function createNewBase() {
     if (ok) { base = { x, y }; break; }
   }
   if (!base) base = { x: 180, y: 180 };
-  return { x: base.x, y: base.y, level: 1, interiorEquipment: { workbench: true }, lastMoved: Date.now() };
+  return { x: base.x, y: base.y, level: 1, interiorEquipment: { workbench: true, bed: true }, lastMoved: Date.now() };
 }
 
 async function assignNewBase(nick) {
@@ -2603,9 +2623,89 @@ function openCreatureDetail(c, loc, ref) {
     buttons.push({ label: 'Add to Party', fn: () => { moveToParty(ref); closeModal(); }, disabled: me.party.length >= PARTY_SIZE });
   }
   if (c.hp < c.maxHp) buttons.push({ label: 'Heal (-5g)', fn: () => { healCreature(c); closeModal(); }, disabled: me.gold < 5 });
+  // Check if player has any trinkets to offer
+  const hasTrinket = Object.keys(me.tools || {}).some(k => ITEMS[k] && ITEMS[k].trinket);
+  if (hasTrinket) buttons.push({ label: 'Give Trinket', fn: () => openTrinketMenu(c, loc, ref) });
   buttons.push({ label: 'Release', danger: true, fn: () => releaseCreature(loc, ref) });
   buttons.push({ label: 'Close', primary: true, fn: closeModal });
   openModal({ title: c.nickname || sp.n, bodyHTML, buttons });
+}
+
+function openTrinketMenu(c, loc, refId) {
+  const trinkets = Object.keys(me.tools || {}).filter(k => ITEMS[k] && ITEMS[k].trinket);
+  if (!trinkets.length) { addLog('no trinkets.', 'bad'); return; }
+  const rows = trinkets.map(k => {
+    const it = ITEMS[k];
+    const ent = me.tools[k];
+    const count = (typeof ent === 'number') ? ent : (ent.count || 1);
+    return `<div class="recipe" data-trinket="${k}">
+      <div class="head"><span><span class="icon">${it.icon}</span>${it.name} ×${count}</span></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:2px">${it.desc}</div>
+    </div>`;
+  }).join('');
+  openModal({
+    title: `Give trinket to ${c.nickname || SPECIES[c.species].n}`,
+    bodyHTML: rows,
+    buttons: [{ label: 'Back', fn: () => openCreatureDetail(c, loc, refId) }],
+    onBody: (b) => {
+      b.querySelectorAll('.recipe[data-trinket]').forEach(el => {
+        el.addEventListener('click', () => applyTrinket(el.dataset.trinket, c, loc, refId));
+      });
+    }
+  });
+}
+
+function applyTrinket(key, c, loc, refId) {
+  const it = ITEMS[key]; if (!it || !it.trinket) return;
+  const sp = SPECIES[c.species];
+  const eff = it.effect;
+  let message = '';
+  if (eff.iv) {
+    const cur = c.ivs[eff.iv];
+    if (cur >= 31) { addLog(`${sp.n}'s ${eff.iv.toUpperCase()} IV is already maxed.`, 'bad'); return; }
+    const newVal = Math.min(31, cur + eff.amount);
+    c.ivs[eff.iv] = newVal;
+    // Recalc HP if needed
+    if (eff.iv === 'hp') {
+      const oldMax = c.maxHp;
+      c.maxHp = calcStat('hp', sp.s[0], c.ivs.hp, c.lvl);
+      c.hp += (c.maxHp - oldMax);
+    }
+    message = `${sp.n}'s ${eff.iv.toUpperCase()} IV rose to ${newVal}.`;
+  } else if (eff.levelUp) {
+    if (c.lvl >= 100) { addLog(`${sp.n} is at max level.`, 'bad'); return; }
+    c.xp = xpForLevel(c.lvl + eff.levelUp);
+    const before = c.lvl;
+    // Reuse awardXp's level path by simulating a tiny enemy; simpler to just increment manually:
+    while (c.lvl < c.lvl + eff.levelUp && c.lvl < 100) {
+      c.lvl++;
+      c.maxHp = calcStat('hp', sp.s[0], c.ivs.hp, c.lvl);
+      c.hp += 5;
+      if (c.hp > c.maxHp) c.hp = c.maxHp;
+      // learn moves
+      const newMove = sp.mv.find(m => m[0] === c.lvl);
+      if (newMove && c.moves.length < 4) {
+        c.moves.push({ key: newMove[1], pp: MOVES[newMove[1]].pp });
+      }
+      // evolution
+      if (sp.evo && c.lvl >= sp.evo.lv && SPECIES[sp.evo.to]) {
+        c.species = sp.evo.to;
+        c.maxHp = calcStat('hp', SPECIES[c.species].s[0], c.ivs.hp, c.lvl);
+        me.seen[c.species] = { seen:true, caught:true };
+      }
+      break;  // only go once; the while was protection
+    }
+    message = `${sp.n} grew to Lv.${c.lvl}!`;
+  } else if (eff.fullRestore) {
+    c.hp = c.maxHp;
+    c.status = null;
+    c.moves.forEach(m => m.pp = MOVES[m.key].pp);
+    message = `${sp.n} was fully restored.`;
+  }
+  removeTool(key, 1);
+  addLog(`${it.icon} ${message}`, 'good');
+  savePlayer(); refreshAllPanels();
+  openCreatureDetail(c, loc, refId);
 }
 
 function moveToStorage(idx) {
@@ -2956,6 +3056,87 @@ function checkPlayerLevel() {
 // ============================================================
 // BATTLE SYSTEM — Pokemon-style, works for wild + PvP
 // ============================================================
+
+// Snapshot party state before a battle so we can show a diff summary after
+function snapshotForSummary(party) {
+  return party.map(c => ({
+    id: c.id, species: c.species, lvl: c.lvl, xp: c.xp, hp: c.hp, maxHp: c.maxHp, isPlayer: !!c.isPlayer
+  }));
+}
+
+// Render the post-battle summary and replace the Continue button with it
+function renderBattleSummary() {
+  const b = activeBattle; if (!b) return '';
+  const pre = b.preBattleSnapshot || [];
+  const rows = [];
+  let outcomeLabel = b.outcome === 'caught' ? '🕸️ CAUGHT!'
+                   : b.outcome === 'victory' ? '⚔️ VICTORY!'
+                   : b.outcome === 'defeat' ? '💀 DEFEAT'
+                   : b.outcome === 'fled' ? '🏃 FLED'
+                   : '— BATTLE END —';
+  let outcomeColor = b.outcome === 'defeat' ? 'var(--red)'
+                   : (b.outcome === 'caught' || b.outcome === 'victory') ? 'var(--green)' : 'var(--amber)';
+
+  // Enemy info
+  const enemyLine = b.enemyDescriptor ? `<div style="text-align:center;font-size:11px;color:var(--text-dim);margin-bottom:8px">vs ${b.enemyDescriptor}</div>` : '';
+
+  // Per-combatant diffs
+  for (const c of b.mySide.party) {
+    const old = pre.find(p => p.id === c.id);
+    if (!old) continue;
+    const sp = SPECIES[c.species];
+    const isPlayer = c.isPlayer;
+    const name = isPlayer ? nickname : (c.nickname || (sp ? sp.n : '?'));
+    const evolvedFrom = old.species !== c.species ? SPECIES[old.species]?.n : null;
+    const xpGain = (c.xp || 0) - (old.xp || 0);
+    const lvlGain = c.lvl - old.lvl;
+    const hpChange = (c.hp - old.hp);
+
+    const bits = [];
+    if (lvlGain > 0) bits.push(`<span style="color:var(--green)">Lv.${old.lvl} → ${c.lvl}</span>`);
+    if (xpGain > 0) bits.push(`<span style="color:var(--blue)">+${xpGain} XP</span>`);
+    if (evolvedFrom) bits.push(`<span style="color:var(--amber)">evolved from ${evolvedFrom}!</span>`);
+    if (hpChange < 0) bits.push(`<span style="color:var(--red)">${hpChange} HP</span>`);
+    else if (hpChange > 0) bits.push(`<span style="color:var(--green)">+${hpChange} HP</span>`);
+
+    if (!bits.length && c.hp > 0) continue;  // no change, not fainted: skip
+    const fainted = c.hp <= 0;
+
+    rows.push(`<div style="display:grid;grid-template-columns:32px 1fr;gap:8px;padding:6px 4px;border-bottom:1px solid var(--bg-inset);font-size:11px">
+      <div style="font-size:22px;text-align:center;line-height:1">${isPlayer ? (me.glyph || '🧑') : (sp ? sp.g : '?')}</div>
+      <div>
+        <div style="font-weight:700">${name}${fainted ? ' <span style="color:var(--red)">FAINTED</span>' : ''}</div>
+        <div style="color:var(--text-dim)">${bits.join(' · ') || '—'}</div>
+      </div>
+    </div>`);
+  }
+
+  // Player-level gold + HP diff
+  const goldDelta = me.gold - (b.preBattleGold ?? me.gold);
+  const playerHpDelta = me.hp - (b.preBattlePlayerHp ?? me.hp);
+  const playerXpDelta = me.xp - (b.preBattlePlayerXp ?? me.xp);
+  const playerLvlDelta = me.lvl - (b.preBattlePlayerLvl ?? me.lvl);
+  const worldBits = [];
+  if (goldDelta > 0) worldBits.push(`<span style="color:var(--green)">+${goldDelta} gold</span>`);
+  else if (goldDelta < 0) worldBits.push(`<span style="color:var(--red)">${goldDelta} gold</span>`);
+  if (playerLvlDelta > 0) worldBits.push(`<span style="color:var(--amber)">You reached Lv.${me.lvl}!</span>`);
+  else if (playerXpDelta > 0) worldBits.push(`<span style="color:var(--blue)">+${playerXpDelta} player XP</span>`);
+  if (playerHpDelta < 0 && !b.mySide.party.find(c => c.isPlayer)) worldBits.push(`<span style="color:var(--red)">${playerHpDelta} HP</span>`);
+
+  const worldLine = worldBits.length
+    ? `<div style="margin-top:10px;padding:8px;background:var(--bg-inset);border:1px solid var(--border);font-size:11px;text-align:center">${worldBits.join(' · ')}</div>`
+    : '';
+
+  return `
+    <div style="text-align:center;font-size:22px;font-family:var(--display);color:${outcomeColor};letter-spacing:3px;margin-bottom:6px">${outcomeLabel}</div>
+    ${enemyLine}
+    <div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);background:var(--bg-inset);padding:4px">
+      ${rows.join('') || '<div class="empty-state" style="padding:12px">no changes recorded.</div>'}
+    </div>
+    ${worldLine}
+  `;
+}
+
 function startWildBattle(anchorId) {
   const anchor = wildlifePlan[anchorId];
   if (!anchor || wildlifeDefeats[anchorId]) return;
@@ -2991,7 +3172,14 @@ function startWildBattle(anchorId) {
     enemySide: { party: [wildInst], activeIdx: 0 },
     log: [`A wild ${sp.n} appeared! (Lv.${anchor.level} · ${sp.r})`],
     turn: 1, awaiting: 'input', phase: 'pick_move',
-    queuedMyMove: null, charging: {}
+    queuedMyMove: null, charging: {},
+    preBattleSnapshot: snapshotForSummary(mySideParty),
+    preBattleGold: me.gold,
+    preBattlePlayerHp: me.hp,
+    preBattlePlayerXp: me.xp,
+    preBattlePlayerLvl: me.lvl,
+    enemyDescriptor: `${sp.n} Lv.${anchor.level} (${sp.r})`,
+    outcome: null  // 'victory' | 'caught' | 'defeat' | 'fled'
   };
   openBattleModal();
 }
@@ -3085,6 +3273,7 @@ function openBattleModal() {
     </div>
     <div class="party-mini-grid">${partyMiniHTML}${emptySlotsHTML}</div>
     <div id="battle-log">${logHTML}</div>
+    <div id="battle-summary"></div>
     <div id="battle-actions"></div>`;
 
   openModal({
@@ -3115,6 +3304,15 @@ function renderBattleActions() {
   if (!el) return;
 
   if (b.phase === 'end') {
+    // Determine outcome if not already set
+    if (!b.outcome) {
+      const enemyAlive = b.enemySide.party.some(c => c && c.hp > 0);
+      const mineAlive = b.mySide.party.some(c => c && c.hp > 0);
+      if (!enemyAlive && mineAlive) b.outcome = 'victory';
+      else if (!mineAlive) b.outcome = 'defeat';
+    }
+    const summaryEl = document.getElementById('battle-summary');
+    if (summaryEl) summaryEl.innerHTML = renderBattleSummary();
     el.innerHTML = `<div class="battle-main-grid">
       <button class="btn primary" onclick="window._closeBattle()">Continue</button>
     </div>`;
@@ -3254,6 +3452,7 @@ function playerCatch() {
     wildlifeDefeats[b.enemySide.party[0].anchorId] = Date.now();
     update(ref(db, `wildlifeDefeats/${b.enemySide.party[0].anchorId}`), Date.now());
     b.phase = 'end';
+    b.outcome = 'caught';
     addLog(`caught ${sp.n}!`, 'good');
     savePlayer();
   } else {
@@ -3272,6 +3471,7 @@ function playerFlee() {
   if (my.hp <= 0 || Math.random() < 0.75) {
     b.log.push('Fled successfully.');
     b.phase = 'end';
+    b.outcome = 'fled';
     openBattleModal();
   } else {
     b.log.push("Couldn't flee!");
@@ -3425,6 +3625,7 @@ function executeMove(attacker, atkSide, moveKey, cb) {
           b.log.push(`${b.pvpOpponent} is out of creatures — you win!`);
           me.battleWins = (me.battleWins||0) + 1;
           b.phase = 'end';
+          b.outcome = 'victory';
           if (b.pvpBattleId) finishPvp(true);
         } else {
           b.enemySide.activeIdx = next;
@@ -3443,6 +3644,7 @@ function executeMove(attacker, atkSide, moveKey, cb) {
         me.gold = Math.max(0, me.gold - 10);
         if (b.kind === 'pvp') { me.battleLosses = (me.battleLosses||0) + 1; if (b.pvpBattleId) finishPvp(false); }
         b.phase = 'end';
+        b.outcome = 'defeat';
       } else {
         b.phase = 'must_switch';
       }
@@ -3651,7 +3853,8 @@ function watchPvpBattle(battleId, myRole) {
       return;
     }
     // Reconstruct local activeBattle from synced state
-    if (!activeBattle || activeBattle.pvpBattleId !== battleId) activeBattle = { kind:'pvp', pvpBattleId: battleId, pvpRole: myRole, charging: {} };
+    const isFirst = (!activeBattle || activeBattle.pvpBattleId !== battleId);
+    if (isFirst) activeBattle = { kind:'pvp', pvpBattleId: battleId, pvpRole: myRole, charging: {} };
     const myPartyKey = myRole === 'p1' ? 'p1Party' : 'p2Party';
     const enPartyKey = myRole === 'p1' ? 'p2Party' : 'p1Party';
     const myActKey   = myRole === 'p1' ? 'p1ActiveIdx' : 'p2ActiveIdx';
@@ -3663,6 +3866,16 @@ function watchPvpBattle(battleId, myRole) {
     activeBattle.pvpOpponent = myRole === 'p1' ? data.p2 : data.p1;
     activeBattle.phase = (data.turnOwner === nickname) ? 'pick_move' : 'waiting_opponent';
     activeBattle.remoteData = data;
+    // Snapshot exactly once at the first sync so the summary at end has a baseline
+    if (isFirst) {
+      activeBattle.preBattleSnapshot = snapshotForSummary(activeBattle.mySide.party);
+      activeBattle.preBattleGold = me.gold;
+      activeBattle.preBattlePlayerHp = me.hp;
+      activeBattle.preBattlePlayerXp = me.xp;
+      activeBattle.preBattlePlayerLvl = me.lvl;
+      activeBattle.enemyDescriptor = `${activeBattle.pvpOpponent} (PvP)`;
+      activeBattle.outcome = null;
+    }
     openBattleModal();
   });
 }
@@ -4217,7 +4430,14 @@ function startNpcBattle(npc) {
     enemySide: { party: [npcCreature], activeIdx: 0 },
     log: [`${npc.name}'s ${sp.n} (Lv.${q.lvl}) enters the fight!`],
     turn: 1, awaiting: 'input', phase: 'pick_move',
-    queuedMyMove: null, charging: {}
+    queuedMyMove: null, charging: {},
+    preBattleSnapshot: snapshotForSummary(mySideParty),
+    preBattleGold: me.gold,
+    preBattlePlayerHp: me.hp,
+    preBattlePlayerXp: me.xp,
+    preBattlePlayerLvl: me.lvl,
+    enemyDescriptor: `${npc.name}'s ${sp.n} Lv.${q.lvl}`,
+    outcome: null
   };
   openBattleModal();
 }
