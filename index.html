@@ -572,6 +572,9 @@
         <div>Online: <span id="s-online" style="color:var(--green)">0</span> / 5</div>
         <div>World seed: <span id="s-seed" style="color:var(--amber)">—</span></div>
       </div>
+      <div style="margin-top:16px">
+        <button class="btn primary" id="btn-home" style="width:100%">Return to Base</button>
+      </div>
     </div>
 
     <div class="tab-content" id="tab-inv" style="display:none">
@@ -654,12 +657,12 @@ const BASE_MOVE_COOLDOWN_MS = 300_000;
 const EGG_HATCH_MS = 120_000; // 2 min base hatch timer
 
 const BIOMES = {
-  grass:    { glyph: '.', name: 'Grasslands', color: '#1a2e1a', colorLite: '#2a4020', walkable: true },
-  forest:   { glyph: '♣', name: 'Forest',     color: '#14251c', colorLite: '#1c3325', walkable: true },
-  mountain: { glyph: '^', name: 'Mountain',   color: '#2a2520', colorLite: '#3a342d', walkable: true },
-  water:    { glyph: '~', name: 'Water',      color: '#152535', colorLite: '#1f3548', walkable: false },
-  cave:     { glyph: '•', name: 'Cave',       color: '#0f0f0f', colorLite: '#181818', walkable: true },
-  sand:     { glyph: '░', name: 'Beach',      color: '#3a3020', colorLite: '#4a3d28', walkable: true },
+  grass:    { glyph: '.', name: 'Grasslands', color: '#2d4a28', colorLite: '#3d6038', walkable: true },
+  forest:   { glyph: '♣', name: 'Forest',     color: '#1e3a24', colorLite: '#284a2e', walkable: true },
+  mountain: { glyph: '^', name: 'Mountain',   color: '#4a4238', colorLite: '#5a5246', walkable: true },
+  water:    { glyph: '~', name: 'Water',      color: '#1f3a55', colorLite: '#2a4a68', walkable: false },
+  cave:     { glyph: '•', name: 'Cave',       color: '#1a1a1a', colorLite: '#262626', walkable: true },
+  sand:     { glyph: '░', name: 'Beach',      color: '#6b5838', colorLite: '#7d6a48', walkable: true },
 };
 
 const RESOURCES = {
@@ -813,6 +816,14 @@ const MOVES = {
   realitybend:{ name: 'Reality Bend', type:'arcane', power:110,acc:85,  pp:5 },
   chronoshift:{ name: 'Chrono Shift', type:'arcane', power:0,  acc:100, pp:15, priority:2, stat:{self:{spd:2}} },
   cosmicray:  { name: 'Cosmic Ray',   type:'arcane', power:120,acc:80,  pp:5 },
+  // PLAYER MOVES — used only when the player is the active battler
+  _punch:       { name: 'Punch',         type:'normal', power:30, acc:100, pp:99 },
+  _slash_stone: { name: 'Stone Slash',   type:'normal', power:50, acc:95,  pp:25 },
+  _slash_copper:{ name: 'Copper Slash',  type:'normal', power:70, acc:95,  pp:25 },
+  _slash_iron:  { name: 'Iron Slash',    type:'normal', power:90, acc:95,  pp:25 },
+  _block:       { name: 'Brace',         type:'normal', power:0,  acc:100, pp:10, stat:{self:{def:2}} },
+  _heavy:       { name: 'Heavy Strike',  type:'normal', power:80, acc:75,  pp:10 },
+  _first_aid:   { name: 'First Aid',     type:'normal', power:0,  acc:100, pp:5, healSelf:0.5 },
 };
 
 // ============================================================
@@ -1041,6 +1052,8 @@ const SPECIES = {
   arcbeast:     { g:'🐺', n:'Arcbeast',     t:'arcane', r:'epic',      b:['mountain'],         s:[95,90,68,82], mv:[[1,'arcanepulse'],[1,'runeburst'],[48,'realitybend'],[56,'cosmicray']] },
   runechampion: { g:'🏆', n:'Runechampion', t:'arcane', r:'legendary', b:['mountain','cave'],  s:[130,115,88,92], mv:[[1,'realitybend'],[1,'runeburst'],[1,'arcanepulse'],[50,'cosmicray'],[60,'judgement']] },
   voidsovereign:{ g:'🌀', n:'Voidsovereign',t:'arcane', r:'mythic',    b:['cave','mountain'],  s:[160,128,108,118], mv:[[1,'cosmicray'],[1,'realitybend'],[1,'runeburst'],[1,'chronoshift'],[60,'judgement']] },
+  // Virtual species representing the human player in battle (never spawns wild)
+  _player:      { g:'🧑', n:'You',          t:'normal', r:'common',    b:[],                    s:[120,35,20,25], mv:[[1,'_punch']] },
 };
 
 const RARITY_WEIGHTS = { common:1, uncommon:0.35, rare:0.10, epic:0.03, legendary:0.008, mythic:0.002 };
@@ -1396,18 +1409,22 @@ async function attemptEnter() {
       me.party.forEach(ensureCreatureSchema);
       Object.values(me.creatureStorage).forEach(ensureCreatureSchema);
     } else {
-      const spawn = findSafeSpawn(world);
+      // Assign base FIRST so we can spawn the player next to it
+      const tempBase = await createNewBase();
+      await set(ref(db, `bases/${nick}`), tempBase);
+      myBase = tempBase;
       me = {
-        nickname: nick, x: spawn.x, y: spawn.y,
+        nickname: nick,
+        x: tempBase.x, y: tempBase.y + 1,  // one tile south of base (outside the door)
         hp: 100, maxHp: 100, lvl: 1, xp: 0, gold: 50,
         inventory: { wood: 0, stone: 0, copper: 0, iron: 0, food: 0 },
         tools: {}, party: [], creatureStorage: {}, seen: {},
         battleWins: 0, battleLosses: 0,
         createdAt: Date.now()
       };
+      // Make sure spawn tile is walkable (fallback to base tile itself)
+      if (me.y >= WORLD_SIZE || !BIOMES[world[me.y][me.x].biome].walkable) { me.y = tempBase.y; }
       await set(playerRef, me);
-      // Assign base
-      await assignNewBase(nick);
     }
 
     // Fetch / create base
@@ -1446,8 +1463,7 @@ function findSafeSpawn(world) {
   return { x: 60, y: 60 };
 }
 
-async function assignNewBase(nick) {
-  // Place base in a grassy / sandy walkable region with space
+async function createNewBase() {
   let tries = 0, base = null;
   while (tries++ < 500) {
     const x = 10 + Math.floor(Math.random() * (WORLD_SIZE - 20));
@@ -1455,7 +1471,6 @@ async function assignNewBase(nick) {
     const tile = world[y][x];
     if (tile.biome === 'water') continue;
     if (tile.resource) continue;
-    // ensure nearby is walkable
     let ok = true;
     for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
       if (!BIOMES[world[y+dy]?.[x+dx]?.biome || 'water'].walkable) { ok = false; break; }
@@ -1463,10 +1478,11 @@ async function assignNewBase(nick) {
     if (ok) { base = { x, y }; break; }
   }
   if (!base) base = { x: 60, y: 60 };
-  const baseObj = {
-    x: base.x, y: base.y, level: 1, interiorEquipment: { workbench: true },
-    lastMoved: Date.now()
-  };
+  return { x: base.x, y: base.y, level: 1, interiorEquipment: { workbench: true }, lastMoved: Date.now() };
+}
+
+async function assignNewBase(nick) {
+  const baseObj = await createNewBase();
   await set(ref(db, `bases/${nick}`), baseObj);
   myBase = baseObj;
 }
@@ -1518,6 +1534,56 @@ function levelFromXp(xp) {
   let lvl = 1;
   while (xpForLevel(lvl + 1) <= xp && lvl < 100) lvl++;
   return lvl;
+}
+
+// ============================================================
+// PLAYER AS COMBATANT — convert `me` into a creature-like entity
+// so the battle system can treat the player as a first-class fighter.
+// ============================================================
+function getPlayerMoves() {
+  const m = [{ key: '_punch', pp: 99 }];
+  const bestWeapon = findBestTool('weapon');
+  if (bestWeapon === 'stone_sword')  m.push({ key: '_slash_stone',  pp: 25 });
+  if (bestWeapon === 'copper_sword') m.push({ key: '_slash_copper', pp: 25 });
+  if (bestWeapon === 'iron_sword')   m.push({ key: '_slash_iron',   pp: 25 });
+  m.push({ key: '_block',     pp: 10 });
+  m.push({ key: '_heavy',     pp: 10 });
+  if (me.inventory && me.inventory.food >= 3) m.push({ key: '_first_aid', pp: 5 });
+  return m;
+}
+
+function playerToCombatant() {
+  // Atk bonus from equipped weapon tier
+  const bestWeapon = findBestTool('weapon');
+  const atkBonus = bestWeapon ? (ITEMS[bestWeapon].bonus?.atk || 0) : 0;
+  const bestArmor = findBestTool('armor');
+  const defBonus = bestArmor ? (ITEMS[bestArmor].bonus?.def || 0) : 0;
+  const hpBonus  = bestArmor ? (ITEMS[bestArmor].bonus?.hp  || 0) : 0;
+  return {
+    id: 'player_self',
+    species: '_player',
+    isPlayer: true,
+    nickname: nickname,
+    lvl: me.lvl,
+    xp: me.xp,
+    hp: me.hp,
+    maxHp: me.maxHp + hpBonus,
+    ivs: { hp: 15, atk: 15, def: 15, spd: 15 },
+    // Override base stats by baking in weapon/armor bonuses
+    _atkBonus: atkBonus,
+    _defBonus: defBonus,
+    statMods: { atk: 0, def: 0, spd: 0 },
+    moves: getPlayerMoves(),
+    status: null,
+    caughtAt: 0
+  };
+}
+
+function syncPlayerFromCombatant(c) {
+  me.hp = Math.max(0, c.hp);
+  me.xp = c.xp;
+  if (me.hp > me.maxHp) me.hp = me.maxHp;
+  checkPlayerLevel();
 }
 
 
@@ -1602,6 +1668,13 @@ function startGame() {
   wireTabs();
   wireInput();
   wireDpad();
+  document.getElementById('btn-home').addEventListener('click', () => {
+    if (interior) return;
+    me.x = myBase.x; me.y = myBase.y + 1;
+    if (!BIOMES[world[me.y]?.[me.x]?.biome || 'water'].walkable) { me.y = myBase.y; }
+    savePosOnly(); refreshAllPanels(); renderWorld(); renderMinimap();
+    addLog('returned to base.', 'info');
+  });
   refreshAllPanels();
   renderWorld();
   renderMinimap();
@@ -1684,11 +1757,6 @@ function renderWorld() {
       const lite = ((wx + wy) % 2 === 0);
       ctx.fillStyle = lite ? biome.colorLite : biome.color;
       ctx.fillRect(tx * tileSize, ty * tileSize, tileSize, tileSize);
-      // biome texture glyph
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.font = `${Math.floor(tileSize*0.6)}px ${getComputedStyle(document.body).fontFamily}`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(biome.glyph, tx*tileSize + tileSize/2, ty*tileSize + tileSize/2);
     }
   }
 
@@ -1842,7 +1910,7 @@ function renderInterior() {
   ctx.fillRect(px * tileSize, py * tileSize, tileSize, tileSize);
   drawEmoji('🧑', px * tileSize + tileSize/2, py * tileSize + tileSize/2, tileSize * 0.88);
 
-  if (me.x === Math.floor(size/2) && me.y === size - 1) {
+  if (me.x === Math.floor(size/2) && me.y === size - 2) {
     interactPromptKey = { kind: 'interior_door' };
     interactLabel = '[SPACE] exit base';
   }
@@ -1966,7 +2034,6 @@ function tryMove(dx, dy) {
     if (nx < 0 || ny < 0 || nx >= WORLD_SIZE || ny >= WORLD_SIZE) return;
     const tile = world[ny][nx];
     if (!BIOMES[tile.biome].walkable) return;
-    if (tile.resource && !depletedResources[`${nx}_${ny}`]) return;  // block walking through resources
     // block other players
     for (const p of Object.values(players)) {
       if (p.x === nx && p.y === ny) return;
@@ -2018,7 +2085,7 @@ function handleHarvest(x, y) {
   const res = RESOURCES[tile.resource];
   if (!res) return;
   // tool requirement
-  if (res.toolType) {
+  if (res.toolType && res.tierReq >= 1) {
     const bestTool = findBestTool(res.toolType);
     if (!bestTool || ITEMS[bestTool].tier < res.tierReq) {
       addLog(`need a tier ${res.tierReq} ${res.toolType} for ${res.name}`, 'bad');
@@ -2312,12 +2379,13 @@ function healCreature(c) {
 
 function renderDex() {
   const el = document.getElementById('dex-list');
-  const total = Object.keys(SPECIES).length;
+  const allSpecies = Object.entries(SPECIES).filter(([k]) => !k.startsWith('_'));
+  const total = allSpecies.length;
   const caught = Object.values(me.seen || {}).filter(v => v && v.caught).length;
-  const seen = Object.keys(me.seen || {}).length;
+  const seen = Object.keys(me.seen || {}).filter(k => !k.startsWith('_')).length;
   document.getElementById('dex-summary').textContent = `${caught} caught · ${seen} seen · ${total} total`;
   const rows = [];
-  for (const [key, sp] of Object.entries(SPECIES)) {
+  for (const [key, sp] of allSpecies) {
     const rec = me.seen && me.seen[key];
     const caughtEmoji = rec && rec.caught ? '✓' : (rec ? '◌' : '·');
     const color = rec && rec.caught ? 'var(--green)' : (rec ? 'var(--amber)' : 'var(--text-faded)');
@@ -2631,14 +2699,12 @@ function checkPlayerLevel() {
 function startWildBattle(anchorId) {
   const anchor = wildlifePlan[anchorId];
   if (!anchor || wildlifeDefeats[anchorId]) return;
-  if (!me.party.length) {
-    // Starter case — offer catch attempt with tame net
-    openWildChoiceNoParty(anchor, anchorId);
+
+  // If player is too hurt AND has no party, they need to recover
+  if (me.hp <= 0 && !me.party.length) {
+    addLog('you are too injured. rest at your base.', 'bad');
     return;
   }
-  // Find first alive party creature
-  const active = me.party.find(c => c.hp > 0);
-  if (!active) { addLog('your party is defeated. rest at the bed.', 'bad'); return; }
 
   const sp = SPECIES[anchor.species];
   const wildInst = makeCreatureInstance(anchor.species, anchor.level);
@@ -2649,12 +2715,22 @@ function startWildBattle(anchorId) {
   me.seen = me.seen || {};
   me.seen[anchor.species] = me.seen[anchor.species] || { seen: true, caught: false };
 
+  // Player is slot 0, creatures fill the rest
+  const playerCombat = playerToCombatant();
+  const mySideParty = [playerCombat, ...me.party];
+  // Pick initial active: player if alive, else first alive creature
+  let activeIdx = 0;
+  if (playerCombat.hp <= 0) {
+    activeIdx = mySideParty.findIndex(c => c.hp > 0);
+    if (activeIdx === -1) { addLog('no combatants available.', 'bad'); return; }
+  }
+
   activeBattle = {
     kind: 'wild',
-    mySide: { party: me.party, activeIdx: me.party.indexOf(active) },
+    mySide: { party: mySideParty, activeIdx },
     enemySide: { party: [wildInst], activeIdx: 0 },
     log: [`A wild ${sp.n} appeared! (Lv.${anchor.level} · ${sp.r})`],
-    turn: 1, awaiting: 'input', phase: 'my_turn',
+    turn: 1, awaiting: 'input', phase: 'pick_move',
     queuedMyMove: null, charging: {}
   };
   openBattleModal();
@@ -2822,7 +2898,18 @@ window._battleAction = (kind) => {
   else if (kind === 'flee') { playerFlee(); }
 };
 
-window._closeBattle = () => { closeModal(); activeBattle = null; refreshAllPanels(); renderWorld(); renderMinimap(); };
+window._closeBattle = () => {
+  // Sync player combatant back to `me` if we fought with one
+  if (activeBattle && activeBattle.mySide && activeBattle.mySide.party) {
+    const playerC = activeBattle.mySide.party.find(c => c && c.isPlayer);
+    if (playerC) syncPlayerFromCombatant(playerC);
+    // Creatures in me.party were references, mutations already applied.
+    // But if the player was at index 0, me.party[i] === mySide.party[i+1].
+    // Nothing to do there — JS shared refs.
+  }
+  savePlayer();
+  closeModal(); activeBattle = null; refreshAllPanels(); renderWorld(); renderMinimap();
+};
 
 function showSwitchMenu() {
   const b = activeBattle;
@@ -3078,11 +3165,13 @@ function executeMove(attacker, atkSide, moveKey, cb) {
         }
       }
     } else {
-      // My creature fainted
+      // My creature (or player) fainted
       const next = b.mySide.party.findIndex(c => c.hp > 0);
       if (next === -1) {
-        b.log.push(`All your creatures have fainted. You black out!`);
-        me.hp = Math.max(1, Math.floor(me.maxHp * 0.3));
+        b.log.push(`All combatants have fallen. You black out!`);
+        // Player's combatant already at hp 0 — sync will persist that; restore to 30% for recovery
+        const playerC = b.mySide.party.find(c => c && c.isPlayer);
+        if (playerC) playerC.hp = Math.max(1, Math.floor(playerC.maxHp * 0.3));
         me.party.forEach(c => c.hp = Math.floor(c.maxHp * 0.2));  // revive weakly
         me.gold = Math.max(0, me.gold - 10);
         if (b.kind === 'pvp') { me.battleLosses = (me.battleLosses||0) + 1; if (b.pvpBattleId) finishPvp(false); }
@@ -3100,6 +3189,11 @@ function effectiveStat(c, which) {
   const sp = SPECIES[c.species];
   const base = { atk: sp.s[1], def: sp.s[2], spd: sp.s[3] }[which];
   let stat = calcStat(which, base, c.ivs[which], c.lvl);
+  // Player weapon / armor bonuses
+  if (c.isPlayer) {
+    if (which === 'atk' && c._atkBonus) stat += c._atkBonus;
+    if (which === 'def' && c._defBonus) stat += c._defBonus;
+  }
   const mod = (c.statMods && c.statMods[which]) || 0;
   if (mod > 0) stat = Math.floor(stat * (2 + mod) / 2);
   else if (mod < 0) stat = Math.floor(stat * 2 / (2 - mod));
@@ -3128,8 +3222,21 @@ function awardXp(winner, loser) {
   const base = (sp.s[0] + sp.s[1] + sp.s[2] + sp.s[3]);
   const xp = Math.floor(base * loser.lvl * rarityMult / 7);
   winner.xp += xp;
-  b.log.push(`${SPECIES[winner.species].n} gained ${xp} XP.`);
-  // Level up check
+  const winnerName = winner.isPlayer ? nickname : SPECIES[winner.species].n;
+  b.log.push(`${winnerName} gained ${xp} XP.`);
+  // For the player combatant, also immediately bump me.xp so checkPlayerLevel works
+  if (winner.isPlayer) {
+    me.xp = winner.xp;
+    const before = me.lvl;
+    checkPlayerLevel();
+    if (me.lvl > before) {
+      winner.lvl = me.lvl;
+      winner.maxHp = me.maxHp;
+      b.log.push(`${nickname} reached Lv.${me.lvl}!`);
+    }
+    return;
+  }
+  // Creature level-up
   while (winner.lvl < 100 && winner.xp >= xpForLevel(winner.lvl + 1)) {
     winner.lvl++;
     winner.maxHp = calcStat('hp', SPECIES[winner.species].s[0], winner.ivs.hp, winner.lvl);
@@ -3186,12 +3293,11 @@ function endOfTurn() {
 // PVP
 // ============================================================
 function sendChallenge(target) {
-  if (!me.party.length) { addLog('need creatures in your party to challenge.', 'bad'); return; }
   if (!players[target]) { addLog(`${target} is not online.`, 'bad'); return; }
   openModal({
     title: `Challenge ${target}`,
     bodyHTML: `<div style="text-align:center;margin:10px">Send a PvP battle challenge to <b>${target}</b>?</div>
-      <div style="font-size:10px;color:var(--text-dim);text-align:center">Winner gets +25 gold, loser drops XP for their creatures.</div>`,
+      <div style="font-size:10px;color:var(--text-dim);text-align:center">You fight with yourself + your party. Winner gets +25 gold.</div>`,
     buttons: [
       { label: 'Send', primary: true, fn: () => { doSendChallenge(target); closeModal(); } },
       { label: 'Cancel', fn: closeModal }
@@ -3201,9 +3307,10 @@ function sendChallenge(target) {
 
 async function doSendChallenge(target) {
   const battleId = `bt_${Date.now()}_${Math.floor(Math.random()*100000)}`;
+  const p1Party = [playerToCombatant(), ...JSON.parse(JSON.stringify(me.party))];
   const payload = {
     id: battleId, p1: nickname, p2: target,
-    p1Party: JSON.parse(JSON.stringify(me.party)),
+    p1Party,
     p1ActiveIdx: 0, p2ActiveIdx: 0,
     state: 'pending', turn: 1,
     turnOwner: nickname,  // whoever needs to make the next move
@@ -3232,12 +3339,11 @@ function showChallengeBanner() {
 function hideChallengeBanner() { document.getElementById('challenge-banner').classList.remove('show'); }
 
 async function acceptChallenge(c) {
-  if (!me.party.length) { addLog('need a party to accept.', 'bad'); return; }
   const battleRef = ref(db, `battles/${c.battleId}`);
   const snap = await get(battleRef);
   if (!snap.exists()) { addLog('challenge expired.', 'bad'); await remove(ref(db, `challenges/${nickname}`)); return; }
   const data = snap.val();
-  data.p2Party = JSON.parse(JSON.stringify(me.party));
+  data.p2Party = [playerToCombatant(), ...JSON.parse(JSON.stringify(me.party))];
   data.state = 'active';
   data.log.push(`${nickname} accepted!`);
   await set(battleRef, data);
@@ -3407,16 +3513,20 @@ async function finishPvp(won) {
   }
   if (won) { me.gold += 25; addLog('+25 gold for winning!', 'good'); }
   else { me.gold = Math.max(0, me.gold - 5); }
-  // Save HP/status changes back to party
+  // Save HP/status/XP changes back to party + player
   const myPartyKey = b.pvpRole === 'p1' ? 'p1Party' : 'p2Party';
   const latestSnap = await get(battleRef);
   if (latestSnap.exists()) {
     const d2 = latestSnap.val();
     const syncedParty = d2[myPartyKey];
     if (syncedParty) {
+      // Player combatant is slot 0
+      const playerEntry = syncedParty.find(c => c && c.isPlayer);
+      if (playerEntry) syncPlayerFromCombatant(playerEntry);
+      // Creatures sync by id
       for (let i = 0; i < me.party.length; i++) {
-        const sc = syncedParty.find(c => c.id === me.party[i].id);
-        if (sc) { me.party[i].hp = sc.hp; me.party[i].status = sc.status; me.party[i].moves = sc.moves; }
+        const sc = syncedParty.find(c => c && !c.isPlayer && c.id === me.party[i].id);
+        if (sc) { me.party[i].hp = sc.hp; me.party[i].status = sc.status; me.party[i].moves = sc.moves; me.party[i].xp = sc.xp || me.party[i].xp; me.party[i].lvl = sc.lvl || me.party[i].lvl; }
       }
     }
   }
