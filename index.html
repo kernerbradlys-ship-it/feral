@@ -1060,7 +1060,7 @@ const SPECIES = {
   runechampion: { g:'🏆', n:'Runechampion', t:'arcane', r:'legendary', b:['mountain','cave'],  s:[130,115,88,92], mv:[[1,'realitybend'],[1,'runeburst'],[1,'arcanepulse'],[50,'cosmicray'],[60,'judgement']] },
   voidsovereign:{ g:'🌀', n:'Voidsovereign',t:'arcane', r:'mythic',    b:['cave','mountain'],  s:[160,128,108,118], mv:[[1,'cosmicray'],[1,'realitybend'],[1,'runeburst'],[1,'chronoshift'],[60,'judgement']] },
   // Virtual species representing the human player in battle (never spawns wild)
-  _player:      { g:'🧑', n:'You',          t:'normal', r:'common',    b:[],                    s:[120,35,20,25], mv:[[1,'_punch']] },
+  _player:      { g:'🧍', n:'You',          t:'normal', r:'common',    b:[],                    s:[120,35,20,25], mv:[[1,'_punch']] },
 };
 
 const RARITY_WEIGHTS = { common:1, uncommon:0.35, rare:0.10, epic:0.03, legendary:0.008, mythic:0.002 };
@@ -1537,7 +1537,7 @@ async function attemptEnter() {
       me.tools = me.tools || {};
       me.battleWins = me.battleWins || 0;
       me.battleLosses = me.battleLosses || 0;
-      me.glyph = me.glyph || '🧑';
+      me.glyph = me.glyph || '🧍';
       me.appearance = me.appearance || null;
       me.quests = me.quests || {};  // npcId -> { state: 'active'|'done', progress: N }
       // Load explored tiles (stored as compressed CSV of "x_y" tokens)
@@ -1571,7 +1571,7 @@ async function attemptEnter() {
         inventory: { wood: 0, stone: 0, copper: 0, iron: 0, food: 0 },
         tools: {}, party: [], creatureStorage: {}, seen: {},
         battleWins: 0, battleLosses: 0,
-        glyph: '🧑', appearance: null, quests: {},
+        glyph: '🧍', appearance: null, quests: {},
         needsCustomization: true,
         createdAt: Date.now()
       };
@@ -1810,7 +1810,7 @@ function saveBase() {
 }
 function savePosOnly() {
   if (!db || !nickname || !me) return;
-  update(ref(db, `online/${nickname}`), { x: me.x, y: me.y, joined: Date.now(), glyph: me.glyph || '🧑' });
+  update(ref(db, `online/${nickname}`), { x: me.x, y: me.y, joined: Date.now(), glyph: me.glyph || '🧍' });
   update(ref(db, `players/${nickname}`), { x: me.x, y: me.y });
 }
 
@@ -2022,6 +2022,13 @@ function renderWorld() {
     ctx.fillStyle = '#ffb347';
     ctx.fillRect(tx*tileSize, ty*tileSize, tileSize, tileSize);
     drawEmoji(p.glyph || '🧍', tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.88);
+    // "P" badge in top-right corner to mark as another player
+    ctx.fillStyle = '#d35454';
+    ctx.fillRect(tx*tileSize + tileSize*0.65, ty*tileSize, tileSize*0.35, tileSize*0.35);
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.floor(tileSize*0.28)}px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('P', tx*tileSize + tileSize*0.825, ty*tileSize + tileSize*0.175);
     ctx.fillStyle = '#ffb347';
     ctx.font = `${Math.floor(tileSize*0.28)}px ${getComputedStyle(document.body).fontFamily}`;
     ctx.fillText(nick, tx*tileSize + tileSize/2, ty*tileSize + tileSize*0.12);
@@ -2067,6 +2074,16 @@ function renderWorld() {
       ctx.fillStyle = '#6ab0c4';
       ctx.fillRect(tx*tileSize, ty*tileSize, tileSize, tileSize);
       drawEmoji(npc.glyph, tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.88);
+      // NPC badge — quest indicator depends on state
+      const qState = (me.quests || {})[npc.id];
+      const badgeChar = !qState ? '?' : qState.state === 'active' && questIsReady(npc, qState) ? '!' : qState.state === 'done' ? '✓' : '…';
+      const badgeColor = !qState ? '#ffb347' : (badgeChar === '!' ? '#7cbd56' : badgeChar === '✓' ? '#566561' : '#6ab0c4');
+      ctx.fillStyle = badgeColor;
+      ctx.fillRect(tx*tileSize + tileSize*0.65, ty*tileSize, tileSize*0.35, tileSize*0.35);
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${Math.floor(tileSize*0.28)}px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(badgeChar, tx*tileSize + tileSize*0.825, ty*tileSize + tileSize*0.175);
       ctx.fillStyle = '#6ab0c4';
       ctx.font = `${Math.floor(tileSize*0.22)}px ${getComputedStyle(document.body).fontFamily}`;
       ctx.fillText(npc.name, tx*tileSize + tileSize/2, ty*tileSize + tileSize*0.12);
@@ -2082,7 +2099,7 @@ function renderWorld() {
     const tx = me.x - startX, ty = me.y - startY;
     ctx.fillStyle = '#7cbd56';
     ctx.fillRect(tx*tileSize, ty*tileSize, tileSize, tileSize);
-    drawEmoji(me.glyph || '🧑', tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.92);
+    drawEmoji(me.glyph || '🧍', tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.92);
   }
 
   // Mark explored tiles around player
@@ -2156,7 +2173,7 @@ function renderInterior() {
   const px = me.x + offset, py = me.y + offset;
   ctx.fillStyle = '#7cbd56';
   ctx.fillRect(px * tileSize, py * tileSize, tileSize, tileSize);
-  drawEmoji(me.glyph || '🧑', px * tileSize + tileSize/2, py * tileSize + tileSize/2, tileSize * 0.92);
+  drawEmoji(me.glyph || '🧍', px * tileSize + tileSize/2, py * tileSize + tileSize/2, tileSize * 0.92);
 
   if (me.x === Math.floor(size/2) && me.y === size - 2) {
     interactPromptKey = { kind: 'interior_door' };
@@ -2918,8 +2935,8 @@ function openRestModal() {
     bodyHTML: `<div style="text-align:center;font-size:48px">🛏️</div>
       <div style="text-align:center;margin:10px">Sleep to restore your HP and heal all party creatures.</div>`,
     buttons: [
-      { label: 'Rest (-2g)', primary: true, disabled: me.gold < 2, fn: () => {
-        me.gold -= 2; me.hp = me.maxHp;
+      { label: 'Rest', primary: true, fn: () => {
+        me.hp = me.maxHp;
         me.party.forEach(c => { c.hp = c.maxHp; c.status = null; c.moves.forEach(m => m.pp = MOVES[m.key].pp); });
         savePlayer(); closeModal(); refreshAllPanels();
         addLog('rested. fully healed.', 'good');
@@ -3103,7 +3120,7 @@ function renderBattleSummary() {
     const fainted = c.hp <= 0;
 
     rows.push(`<div style="display:grid;grid-template-columns:32px 1fr;gap:8px;padding:6px 4px;border-bottom:1px solid var(--bg-inset);font-size:11px">
-      <div style="font-size:22px;text-align:center;line-height:1">${isPlayer ? (me.glyph || '🧑') : (sp ? sp.g : '?')}</div>
+      <div style="font-size:22px;text-align:center;line-height:1">${isPlayer ? (me.glyph || '🧍') : (sp ? sp.g : '?')}</div>
       <div>
         <div style="font-weight:700">${name}${fainted ? ' <span style="color:var(--red)">FAINTED</span>' : ''}</div>
         <div style="color:var(--text-dim)">${bits.join(' · ') || '—'}</div>
@@ -3243,41 +3260,63 @@ function openBattleModal() {
 
   const logHTML = b.log.slice(-6).map(line => `<div>${line}</div>`).join('');
 
-  const bodyHTML = `
-    <div class="battle-arena">
-      <div class="battle-row">
-        <div class="battle-side">
-          <div class="battle-sublabel">${b.kind==='pvp' ? (b.pvpOpponent||'OPPONENT') : 'WILD'}</div>
-          <div class="battle-sprite" style="color:var(--${enSp.r==='legendary'||enSp.r==='mythic'?'amber':'text'})">${enSp.g}</div>
-          <div class="battle-name">${en.nickname||enSp.n} <span class="type-badge type-${enSp.t}">${enSp.t}</span></div>
-          <div class="battle-sublabel">Lv.${en.lvl} · ${enSp.r}</div>
-          <div class="battle-status-icons">${en.status?statusGlyph(en.status):''}</div>
-          <div class="battle-hp-wrap">
-            <div class="battle-hp-bar"><div class="battle-hp-fill ${enHpPct<0.2?'low':enHpPct<0.5?'mid':''}" style="transform:scaleX(${enHpPct})"></div></div>
-            <div class="battle-hp-text">${en.hp}/${en.maxHp}</div>
+  let bodyHTML;
+  if (b.phase === 'end') {
+    // Ensure outcome is stamped before rendering
+    if (!b.outcome) {
+      const enemyAlive = b.enemySide.party.some(c => c && c.hp > 0);
+      const mineAlive = b.mySide.party.some(c => c && c.hp > 0);
+      if (!enemyAlive && mineAlive) b.outcome = 'victory';
+      else if (!mineAlive) b.outcome = 'defeat';
+    }
+    bodyHTML = `
+      <div id="battle-summary">${renderBattleSummary()}</div>
+      <div id="battle-actions" style="margin-top:16px"></div>`;
+  } else {
+    bodyHTML = `
+      <div class="battle-arena">
+        <div class="battle-row">
+          <div class="battle-side">
+            <div class="battle-sublabel">${b.kind==='pvp' ? (b.pvpOpponent||'OPPONENT') : 'WILD'}</div>
+            <div class="battle-sprite" style="color:var(--${enSp.r==='legendary'||enSp.r==='mythic'?'amber':'text'})">${enSp.g}</div>
+            <div class="battle-name">${en.nickname||enSp.n} <span class="type-badge type-${enSp.t}">${enSp.t}</span></div>
+            <div class="battle-sublabel">Lv.${en.lvl} · ${enSp.r}</div>
+            <div class="battle-status-icons">${en.status?statusGlyph(en.status):''}</div>
+            <div class="battle-hp-wrap">
+              <div class="battle-hp-bar"><div class="battle-hp-fill ${enHpPct<0.2?'low':enHpPct<0.5?'mid':''}" style="transform:scaleX(${enHpPct})"></div></div>
+              <div class="battle-hp-text">${en.hp}/${en.maxHp}</div>
+            </div>
           </div>
-        </div>
-        <div class="battle-vs">VS</div>
-        <div class="battle-side">
-          <div class="battle-sublabel">YOU</div>
-          <div class="battle-sprite">${mySp.g}</div>
-          <div class="battle-name">${my.nickname||mySp.n} <span class="type-badge type-${mySp.t}">${mySp.t}</span></div>
-          <div class="battle-sublabel">Lv.${my.lvl}</div>
-          <div class="battle-status-icons">${my.status?statusGlyph(my.status):''}</div>
-          <div class="battle-hp-wrap">
-            <div class="battle-hp-bar"><div class="battle-hp-fill ${myHpPct<0.2?'low':myHpPct<0.5?'mid':''}" style="transform:scaleX(${myHpPct})"></div></div>
-            <div class="battle-hp-text">${my.hp}/${my.maxHp}</div>
+          <div class="battle-vs">VS</div>
+          <div class="battle-side">
+            <div class="battle-sublabel">YOU</div>
+            <div class="battle-sprite">${mySp.g}</div>
+            <div class="battle-name">${my.nickname||mySp.n} <span class="type-badge type-${mySp.t}">${mySp.t}</span></div>
+            <div class="battle-sublabel">Lv.${my.lvl}</div>
+            <div class="battle-status-icons">${my.status?statusGlyph(my.status):''}</div>
+            <div class="battle-hp-wrap">
+              <div class="battle-hp-bar"><div class="battle-hp-fill ${myHpPct<0.2?'low':myHpPct<0.5?'mid':''}" style="transform:scaleX(${myHpPct})"></div></div>
+              <div class="battle-hp-text">${my.hp}/${my.maxHp}</div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-    <div class="party-mini-grid">${partyMiniHTML}${emptySlotsHTML}</div>
-    <div id="battle-log">${logHTML}</div>
-    <div id="battle-summary"></div>
-    <div id="battle-actions"></div>`;
+      <div class="party-mini-grid">${partyMiniHTML}${emptySlotsHTML}</div>
+      <div id="battle-log">${logHTML}</div>
+      <div id="battle-summary"></div>
+      <div id="battle-actions"></div>`;
+  }
 
+  let modalTitle = b.kind === 'pvp' ? `PvP vs ${b.pvpOpponent}` : 'Battle';
+  if (b.phase === 'end') {
+    modalTitle = b.outcome === 'caught' ? 'Creature Caught!'
+               : b.outcome === 'victory' ? 'Victory!'
+               : b.outcome === 'defeat' ? 'Defeated'
+               : b.outcome === 'fled' ? 'Escaped'
+               : 'Battle End';
+  }
   openModal({
-    title: b.kind === 'pvp' ? `PvP vs ${b.pvpOpponent}` : 'Battle',
+    title: modalTitle,
     bodyHTML, wide: true,
     buttons: [],
     onBody: () => {
@@ -3313,9 +3352,7 @@ function renderBattleActions() {
     }
     const summaryEl = document.getElementById('battle-summary');
     if (summaryEl) summaryEl.innerHTML = renderBattleSummary();
-    el.innerHTML = `<div class="battle-main-grid">
-      <button class="btn primary" onclick="window._closeBattle()">Continue</button>
-    </div>`;
+    el.innerHTML = `<button class="btn primary" style="width:100%;font-size:16px;padding:14px;letter-spacing:3px" onclick="window._closeBattle()">OK</button>`;
     return;
   }
   if (b.phase === 'must_switch') {
@@ -4156,22 +4193,20 @@ const SKIN_MODIFIERS = {
   medium_dark: '\u{1F3FE}', dark: '\u{1F3FF}'
 };
 function buildPlayerGlyph(a) {
-  if (!a) return '🧑';
+  if (!a) return '🧍';
   const skinMod = SKIN_MODIFIERS[a.skin] || SKIN_MODIFIERS.medium;
-  // Base person emoji by gender
-  let base;
-  if (a.gender === 'female') base = '\u{1F469}';       // 👩
-  else if (a.gender === 'male') base = '\u{1F468}';    // 👨
-  else base = '\u{1F9D1}';                              // 🧑 (person)
-  // Hair color ZWJ modifiers (only for male/female)
   const ZWJ = '\u200D';
-  const hairEmoji = {
-    red: '\u{1F9B0}', brown: null, blonde: '\u{1F9B1}', black: null, gray: '\u{1F9B3}'
-  }[a.hair];
-  let glyph = base + skinMod;
-  if (hairEmoji && (a.gender === 'male' || a.gender === 'female')) {
-    glyph += ZWJ + hairEmoji;
-  }
+  // Base: person-standing emoji (full body), gendered via ZWJ + gender sign
+  const PERSON_STANDING = '\u{1F9CD}';  // 🧍
+  const MALE_SIGN   = '\u2642';         // ♂
+  const FEMALE_SIGN = '\u2640';         // ♀
+  const VS16        = '\uFE0F';         // variation selector
+  let glyph = PERSON_STANDING + skinMod;
+  if (a.gender === 'male')   glyph += ZWJ + MALE_SIGN + VS16;
+  else if (a.gender === 'female') glyph += ZWJ + FEMALE_SIGN + VS16;
+  // Hair color (only attaches to people-walking/standing emojis, not all fonts)
+  const hairEmoji = { red: '\u{1F9B0}', blonde: '\u{1F9B1}', gray: '\u{1F9B3}' }[a.hair];
+  if (hairEmoji) glyph += ZWJ + hairEmoji;
   return glyph;
 }
 
