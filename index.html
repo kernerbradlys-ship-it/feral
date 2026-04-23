@@ -1412,6 +1412,10 @@ function getBounds() {
   canvas.height = tileSize * VIEW_TILES;
   canvas.style.width = canvas.width + 'px';
   canvas.style.height = canvas.height + 'px';
+  // Center the canvas horizontally in the world-wrap (fixes black space on wide monitors)
+  canvas.style.position = 'absolute';
+  canvas.style.left = Math.floor((rect.width - canvas.width) / 2) + 'px';
+  canvas.style.top = Math.floor((rect.height - canvas.height) / 2) + 'px';
   return { tileSize, tilesAcross: VIEW_TILES };
 }
 
@@ -4195,19 +4199,12 @@ const SKIN_MODIFIERS = {
 function buildPlayerGlyph(a) {
   if (!a) return '🧍';
   const skinMod = SKIN_MODIFIERS[a.skin] || SKIN_MODIFIERS.medium;
-  const ZWJ = '\u200D';
-  // Base: person-standing emoji (full body), gendered via ZWJ + gender sign
-  const PERSON_STANDING = '\u{1F9CD}';  // 🧍
-  const MALE_SIGN   = '\u2642';         // ♂
-  const FEMALE_SIGN = '\u2640';         // ♀
-  const VS16        = '\uFE0F';         // variation selector
-  let glyph = PERSON_STANDING + skinMod;
-  if (a.gender === 'male')   glyph += ZWJ + MALE_SIGN + VS16;
-  else if (a.gender === 'female') glyph += ZWJ + FEMALE_SIGN + VS16;
-  // Hair color (only attaches to people-walking/standing emojis, not all fonts)
-  const hairEmoji = { red: '\u{1F9B0}', blonde: '\u{1F9B1}', gray: '\u{1F9B3}' }[a.hair];
-  if (hairEmoji) glyph += ZWJ + hairEmoji;
-  return glyph;
+  // Use simple, broadly-supported person emojis with just a skin tone modifier.
+  // Avoid ZWJ sequences (gender signs, hair colors) because Chrome/Windows font
+  // fallback breaks them into visible parts instead of rendering the combined glyph.
+  const BASE = { male: '\u{1F468}', female: '\u{1F469}', other: '\u{1F9D1}' };
+  const base = BASE[a.gender] || BASE.other;
+  return base + skinMod;
 }
 
 function openCharacterCustomization(isFirst) {
