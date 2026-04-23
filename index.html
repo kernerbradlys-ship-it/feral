@@ -644,7 +644,7 @@ catch (e) { console.error("Firebase init failed:", e); }
 // ============================================================
 // CONSTANTS
 // ============================================================
-const WORLD_SIZE = 120;
+const WORLD_SIZE = 360;
 const VIEW_TILES = 19;
 const MAX_PLAYERS = 5;
 const RESOURCE_RESPAWN_MS = 60_000;
@@ -1238,6 +1238,121 @@ function generateWildlifePlan(world, seed, count = 160) {
   return anchors;
 }
 
+// ============================================================
+// VILLAGES & NPCS — deterministic from world seed
+// ============================================================
+const NPC_NAMES = ['Cora','Jasper','Willa','Finn','Mira','Otto','Sable','Ren','Tess','Dune','Bram','Nova','Gil','Pip','Quin','Rook','Sol','Tav','Uma','Vex'];
+const NPC_GLYPHS = ['🧔','👩','🧑‍🌾','👨‍⚕️','👩‍🍳','🧙','🧑‍🎨','👩‍🔧','👴','👵','🧑‍🏫','👨‍🎓','👩‍💼','🧑‍🔬'];
+const VILLAGE_NAMES = ['Oakhollow','Stonebrook','Millford','Ashenvale','Redmoor','Greenhaven','Ironhold','Seabrook','Frostpeak','Thornvale'];
+
+function generateVillages(world, seed) {
+  const rng = mulberry32(seed + 777777);
+  const villages = [];
+  let tries = 0;
+  const minDist = 50;  // min distance between villages
+
+  while (villages.length < VILLAGE_NAMES.length && tries++ < 5000) {
+    const x = 25 + Math.floor(rng() * (WORLD_SIZE - 50));
+    const y = 25 + Math.floor(rng() * (WORLD_SIZE - 50));
+    const tile = world[y]?.[x];
+    if (!tile || tile.biome === 'water' || tile.biome === 'cave') continue;
+    // not on resource
+    if (tile.resource) continue;
+    // far from other villages
+    const tooClose = villages.some(v => Math.abs(v.x - x) + Math.abs(v.y - y) < minDist);
+    if (tooClose) continue;
+    // surrounding area walkable-ish
+    let ok = true;
+    for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+      const t = world[y+dy]?.[x+dx];
+      if (!t || !BIOMES[t.biome].walkable) { ok = false; break; }
+    }
+    if (!ok) continue;
+
+    const vid = `v${villages.length}`;
+    const name = VILLAGE_NAMES[villages.length];
+    // 2-3 NPCs per village, placed in a small cluster
+    const npcCount = 2 + Math.floor(rng() * 2);
+    const npcs = [];
+    const usedNames = new Set();
+    for (let i = 0; i < npcCount; i++) {
+      let nName;
+      do { nName = NPC_NAMES[Math.floor(rng() * NPC_NAMES.length)]; } while (usedNames.has(nName));
+      usedNames.add(nName);
+      const ng = NPC_GLYPHS[Math.floor(rng() * NPC_GLYPHS.length)];
+      // place NPC in a 5x5 area around village center, avoiding water/cave
+      let nx = x, ny = y, placed = false;
+      for (let attempt = 0; attempt < 40 && !placed; attempt++) {
+        const dx = Math.floor(rng() * 9) - 4;
+        const dy = Math.floor(rng() * 9) - 4;
+        if (dx === 0 && dy === 0) continue;
+        const candT = world[y+dy]?.[x+dx];
+        if (candT && BIOMES[candT.biome].walkable) {
+          nx = x + dx; ny = y + dy; placed = true;
+        }
+      }
+      if (!placed) { nx = x + 1; ny = y + 1; }
+      const npcId = `${vid}_n${i}`;
+      const quest = generateQuestForNpc(rng, seed, npcId);
+      npcs.push({ id: npcId, villageId: vid, x: nx, y: ny, name: nName, glyph: ng, quest, dialogue: generateDialogue(rng, nName) });
+    }
+    villages.push({ id: vid, x, y, name, npcs });
+  }
+  return villages;
+}
+
+function generateQuestForNpc(rng, seed, npcId) {
+  const QUEST_TYPES = ['fetch','defeat','battle'];
+  const type = QUEST_TYPES[Math.floor(rng() * QUEST_TYPES.length)];
+  if (type === 'fetch') {
+    const items = ['wood','stone','copper','iron','food'];
+    const item = items[Math.floor(rng() * items.length)];
+    const amt = { wood: 15, stone: 10, copper: 5, iron: 3, food: 20 }[item];
+    const reward = { gold: 40 + Math.floor(rng() * 60) };
+    return { type, item, amount: amt, reward, description: `Bring me ${amt} ${ITEMS[item].name}.` };
+  }
+  if (type === 'defeat') {
+    // Pick a random non-starter type to hunt
+    const types = ['fire','water','earth','nature','shadow','toxic'];
+    const t = types[Math.floor(rng() * types.length)];
+    const amt = 3 + Math.floor(rng() * 4);
+    const reward = { gold: 60 + Math.floor(rng() * 80) };
+    return { type, elementType: t, amount: amt, defeated: 0, reward, description: `Defeat ${amt} ${t}-type creatures in the wild.` };
+  }
+  // battle — NPC owns a wild-spec creature to fight
+  const allSpecies = Object.keys(SPECIES).filter(k => !k.startsWith('_'));
+  const pool = allSpecies.filter(k => {
+    const sp = SPECIES[k];
+    return sp.r === 'uncommon' || sp.r === 'rare';
+  });
+  const speciesKey = pool[Math.floor(rng() * pool.length)];
+  const lvl = 10 + Math.floor(rng() * 20);
+  // Reward: a rare creature egg 30% of time, else gold
+  let reward;
+  if (rng() < 0.3) {
+    const rewardPool = allSpecies.filter(k => ['rare','epic'].includes(SPECIES[k].r));
+    const egg = rewardPool[Math.floor(rng() * rewardPool.length)];
+    reward = { egg, gold: 50 };
+  } else {
+    reward = { gold: 100 + Math.floor(rng() * 150) };
+  }
+  return { type, speciesKey, lvl, reward, description: `Beat me in a creature battle.` };
+}
+
+function generateDialogue(rng, name) {
+  const options = [
+    `Greetings traveler. These are troubled times.`,
+    `I haven't seen a face like yours in these parts.`,
+    `The wild creatures grow bolder each season.`,
+    `Stay on the paths. The forests are no longer safe.`,
+    `A storm's coming. I can feel it in my bones.`,
+    `My grandfather fought the ancient ones. Now it's your turn.`,
+    `Take what you learn and use it well.`,
+    `Some say the legendaries still walk the earth.`
+  ];
+  return options[Math.floor(rng() * options.length)];
+}
+
 
 // ============================================================
 // GAME STATE
@@ -1261,6 +1376,11 @@ let dexKnowledge = {};  // species key -> { seen: true, caught: true }
 let interactPromptKey = null;
 let moveBusy = false;
 let lastMoveTs = 0;
+let VILLAGES = [];       // deterministic village array from seed
+let currentVillage = null; // village the player is currently "in" (near)
+let wildlifePositions = {}; // anchorId -> { x, y } current live position (roaming)
+let exploredTiles = new Set();  // "x_y" strings of tiles revealed for fog-of-war
+let inBattle = false;    // locks modal closure during battles
 
 const canvas = document.getElementById('world');
 const ctx = canvas.getContext('2d');
@@ -1306,6 +1426,9 @@ function openModal({ title, bodyHTML, buttons, wide = false, onClose = null, onB
   document.getElementById('modal').classList.toggle('wide', wide);
   document.getElementById('modal-title').textContent = title || '';
   document.getElementById('modal-body').innerHTML = bodyHTML || '';
+  // Default: show the X close button (battle modal hides it in its onBody)
+  const xBtn = document.getElementById('modal-close');
+  if (xBtn) xBtn.style.visibility = 'visible';
   const btns = document.getElementById('modal-btns');
   btns.innerHTML = '';
   _modalCtx = { onClose };
@@ -1322,6 +1445,8 @@ function openModal({ title, bodyHTML, buttons, wide = false, onClose = null, onB
 }
 
 function closeModal() {
+  // Lock: can't close mid-battle. Only the "Continue" button at end (_closeBattle) is allowed.
+  if (activeBattle && activeBattle.phase !== 'end') return;
   const bg = document.getElementById('modal-bg');
   bg.classList.remove('open');
   if (_modalCtx && _modalCtx.onClose) _modalCtx.onClose();
@@ -1330,6 +1455,7 @@ function closeModal() {
 
 document.getElementById('modal-close').addEventListener('click', closeModal);
 document.getElementById('modal-bg').addEventListener('click', (e) => {
+  if (activeBattle && activeBattle.phase !== 'end') return;
   if (e.target === document.getElementById('modal-bg')) closeModal();
 });
 
@@ -1378,7 +1504,8 @@ async function attemptEnter() {
     } else worldSeed = seedSnap.val();
 
     world = generateWorld(worldSeed);
-    wildlifePlan = generateWildlifePlan(world, worldSeed, 160);
+    wildlifePlan = generateWildlifePlan(world, worldSeed, 900);
+    VILLAGES = generateVillages(world, worldSeed);
 
     // Player data — fresh or migrate
     const playerRef = ref(db, `players/${nick}`);
@@ -1393,6 +1520,13 @@ async function attemptEnter() {
       me.tools = me.tools || {};
       me.battleWins = me.battleWins || 0;
       me.battleLosses = me.battleLosses || 0;
+      me.glyph = me.glyph || '🧑';
+      me.appearance = me.appearance || null;
+      me.quests = me.quests || {};  // npcId -> { state: 'active'|'done', progress: N }
+      // Load explored tiles (stored as compressed CSV of "x_y" tokens)
+      if (me.exploredCSV) {
+        me.exploredCSV.split(',').forEach(t => { if (t) exploredTiles.add(t); });
+      } else exploredTiles = new Set();
       // Convert any legacy tames into the new party/storage format
       if (me.tames) {
         for (const tame of Object.values(me.tames)) {
@@ -1420,6 +1554,8 @@ async function attemptEnter() {
         inventory: { wood: 0, stone: 0, copper: 0, iron: 0, food: 0 },
         tools: {}, party: [], creatureStorage: {}, seen: {},
         battleWins: 0, battleLosses: 0,
+        glyph: '🧑', appearance: null, quests: {},
+        needsCustomization: true,
         createdAt: Date.now()
       };
       // Make sure spawn tile is walkable (fallback to base tile itself)
@@ -1460,7 +1596,7 @@ function findSafeSpawn(world) {
     const y = 20 + Math.floor(Math.random() * (WORLD_SIZE - 40));
     if (BIOMES[world[y][x].biome].walkable && !world[y][x].resource) return { x, y };
   }
-  return { x: 60, y: 60 };
+  return { x: 180, y: 180 };
 }
 
 async function createNewBase() {
@@ -1477,7 +1613,7 @@ async function createNewBase() {
     }
     if (ok) { base = { x, y }; break; }
   }
-  if (!base) base = { x: 60, y: 60 };
+  if (!base) base = { x: 180, y: 180 };
   return { x: base.x, y: base.y, level: 1, interiorEquipment: { workbench: true }, lastMoved: Date.now() };
 }
 
@@ -1644,6 +1780,8 @@ function updateOnlineList() {
 function savePlayer() {
   if (!db || !nickname || !me) return;
   const payload = JSON.parse(JSON.stringify(me));  // clone
+  // Cap explored tiles CSV at ~30k chars (plenty for thousands of tiles)
+  payload.exploredCSV = [...exploredTiles].slice(-6000).join(',');
   update(ref(db, `players/${nickname}`), payload);
 }
 function saveBase() {
@@ -1652,7 +1790,7 @@ function saveBase() {
 }
 function savePosOnly() {
   if (!db || !nickname || !me) return;
-  update(ref(db, `online/${nickname}`), { x: me.x, y: me.y, joined: Date.now() });
+  update(ref(db, `online/${nickname}`), { x: me.x, y: me.y, joined: Date.now(), glyph: me.glyph || '🧑' });
   update(ref(db, `players/${nickname}`), { x: me.x, y: me.y });
 }
 
@@ -1684,6 +1822,12 @@ function startGame() {
   if (!me.party.length && !Object.keys(me.creatureStorage).length) {
     addLog('your first task: catch a wild creature with a tame net.', 'system');
   }
+  // Reveal initial tiles around spawn
+  markExplored(me.x, me.y);
+  // First-login character customization
+  if (me.needsCustomization) {
+    openCharacterCustomization(true);
+  }
 }
 
 function gameTick() {
@@ -1701,7 +1845,53 @@ function gameTick() {
   for (const [k, v] of Object.entries(depletedResources)) {
     if (now - v > RESOURCE_RESPAWN_MS) delete depletedResources[k];
   }
+  // Roam nearby wildlife (only those visible to save work)
+  if (!interior) {
+    const half = Math.floor(VIEW_TILES / 2) + 4;
+    for (const [aid, anchor] of Object.entries(wildlifePlan)) {
+      if (wildlifeDefeats[aid]) continue;
+      const pos = wildlifePositions[aid] || { x: anchor.x, y: anchor.y };
+      // Only roam creatures near viewport for performance
+      if (Math.abs(pos.x - me.x) > half || Math.abs(pos.y - me.y) > half) continue;
+      // 30% chance to step per tick
+      if (Math.random() > 0.3) continue;
+      const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+      const [dx, dy] = dirs[Math.floor(Math.random() * 4)];
+      const nx = pos.x + dx, ny = pos.y + dy;
+      // keep within 3 tiles of anchor
+      if (Math.abs(nx - anchor.x) > 3 || Math.abs(ny - anchor.y) > 3) continue;
+      const tile = world[ny]?.[nx];
+      if (!tile || !BIOMES[tile.biome].walkable) continue;
+      if (nx === me.x && ny === me.y) continue;
+      // don't overlap other wildlife
+      let overlap = false;
+      for (const [oid, opos] of Object.entries(wildlifePositions)) {
+        if (oid === aid) continue;
+        if (opos.x === nx && opos.y === ny && !wildlifeDefeats[oid]) { overlap = true; break; }
+      }
+      if (overlap) continue;
+      wildlifePositions[aid] = { x: nx, y: ny };
+    }
+  }
+  // Check if player entered a village (proximity)
+  currentVillage = null;
+  for (const v of VILLAGES) {
+    if (Math.abs(v.x - me.x) <= 6 && Math.abs(v.y - me.y) <= 6) { currentVillage = v; break; }
+  }
   renderWorld();
+  renderMinimap();
+}
+
+function markExplored(cx, cy) {
+  const RADIUS = 4;
+  for (let dy = -RADIUS; dy <= RADIUS; dy++) {
+    for (let dx = -RADIUS; dx <= RADIUS; dx++) {
+      if (dx*dx + dy*dy > RADIUS*RADIUS + 2) continue;
+      const x = cx + dx, y = cy + dy;
+      if (x < 0 || y < 0 || x >= WORLD_SIZE || y >= WORLD_SIZE) continue;
+      exploredTiles.add(`${x}_${y}`);
+    }
+  }
 }
 
 // ============================================================
@@ -1780,7 +1970,8 @@ function renderWorld() {
   // wildlife
   for (const [anchorId, anchor] of Object.entries(wildlifePlan)) {
     if (wildlifeDefeats[anchorId]) continue;
-    const wx = anchor.x, wy = anchor.y;
+    const pos = wildlifePositions[anchorId] || { x: anchor.x, y: anchor.y };
+    const wx = pos.x, wy = pos.y;
     if (wx < startX || wx >= startX + VIEW_TILES || wy < startY || wy >= startY + VIEW_TILES) continue;
     const tx = wx - startX, ty = wy - startY;
     const sp = SPECIES[anchor.species];
@@ -1808,9 +1999,9 @@ function renderWorld() {
     const wx = p.x, wy = p.y;
     if (wx < startX || wx >= startX + VIEW_TILES || wy < startY || wy >= startY + VIEW_TILES) continue;
     const tx = wx - startX, ty = wy - startY;
-    ctx.fillStyle = 'rgba(255,179,71,0.25)';
+    ctx.fillStyle = '#ffb347';
     ctx.fillRect(tx*tileSize, ty*tileSize, tileSize, tileSize);
-    drawEmoji('🧍', tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.88);
+    drawEmoji(p.glyph || '🧍', tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.88);
     ctx.fillStyle = '#ffb347';
     ctx.font = `${Math.floor(tileSize*0.28)}px ${getComputedStyle(document.body).fontFamily}`;
     ctx.fillText(nick, tx*tileSize + tileSize/2, ty*tileSize + tileSize*0.12);
@@ -1823,22 +2014,59 @@ function renderWorld() {
   // bases (others + own)
   if (myBase && myBase.x >= startX && myBase.x < startX + VIEW_TILES && myBase.y >= startY && myBase.y < startY + VIEW_TILES) {
     const tx = myBase.x - startX, ty = myBase.y - startY;
-    ctx.fillStyle = 'rgba(255,179,71,0.15)';
+    ctx.fillStyle = '#8b5a2b';
     ctx.fillRect(tx*tileSize, ty*tileSize, tileSize, tileSize);
-    drawEmoji('🏠', tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.9);
+    drawEmoji('🏠', tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.95);
     if (me.x === myBase.x && me.y === myBase.y) {
       interactPromptKey = { kind: 'base_door', x: myBase.x, y: myBase.y };
       interactLabel = `[SPACE] enter ${BASE_LEVELS[myBase.level].name}`;
     }
   }
 
+  // villages
+  for (const v of VILLAGES) {
+    if (v.x < startX || v.x >= startX + VIEW_TILES || v.y < startY || v.y >= startY + VIEW_TILES) continue;
+    const tx = v.x - startX, ty = v.y - startY;
+    ctx.fillStyle = '#d4a066';
+    ctx.fillRect(tx*tileSize, ty*tileSize, tileSize, tileSize);
+    drawEmoji('🏘️', tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.95);
+    ctx.fillStyle = '#ffb347';
+    ctx.font = `${Math.floor(tileSize*0.22)}px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.fillText(v.name, tx*tileSize + tileSize/2, ty*tileSize + tileSize*0.12);
+    if (Math.abs(v.x - me.x) + Math.abs(v.y - me.y) === 1) {
+      interactPromptKey = { kind: 'village', id: v.id };
+      interactLabel = `[SPACE] enter ${v.name}`;
+    }
+  }
+
+  // NPCs (inside villages when visiting)
+  if (currentVillage) {
+    for (const npc of currentVillage.npcs) {
+      if (npc.x < startX || npc.x >= startX + VIEW_TILES || npc.y < startY || npc.y >= startY + VIEW_TILES) continue;
+      const tx = npc.x - startX, ty = npc.y - startY;
+      ctx.fillStyle = '#6ab0c4';
+      ctx.fillRect(tx*tileSize, ty*tileSize, tileSize, tileSize);
+      drawEmoji(npc.glyph, tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.88);
+      ctx.fillStyle = '#6ab0c4';
+      ctx.font = `${Math.floor(tileSize*0.22)}px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.fillText(npc.name, tx*tileSize + tileSize/2, ty*tileSize + tileSize*0.12);
+      if (Math.abs(npc.x - me.x) + Math.abs(npc.y - me.y) === 1) {
+        interactPromptKey = { kind: 'npc', id: npc.id };
+        interactLabel = `[SPACE] talk to ${npc.name}`;
+      }
+    }
+  }
+
   // player
   {
     const tx = me.x - startX, ty = me.y - startY;
-    ctx.fillStyle = 'rgba(124,189,86,0.28)';
+    ctx.fillStyle = '#7cbd56';
     ctx.fillRect(tx*tileSize, ty*tileSize, tileSize, tileSize);
-    drawEmoji('🧑', tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.88);
+    drawEmoji(me.glyph || '🧑', tx*tileSize + tileSize/2, ty*tileSize + tileSize/2, tileSize*0.92);
   }
+
+  // Mark explored tiles around player
+  markExplored(me.x, me.y);
 
   showHint(interactLabel);
 }
@@ -1906,9 +2134,9 @@ function renderInterior() {
 
   // Player at interior-local coords
   const px = me.x + offset, py = me.y + offset;
-  ctx.fillStyle = 'rgba(124,189,86,0.28)';
+  ctx.fillStyle = '#7cbd56';
   ctx.fillRect(px * tileSize, py * tileSize, tileSize, tileSize);
-  drawEmoji('🧑', px * tileSize + tileSize/2, py * tileSize + tileSize/2, tileSize * 0.88);
+  drawEmoji(me.glyph || '🧑', px * tileSize + tileSize/2, py * tileSize + tileSize/2, tileSize * 0.92);
 
   if (me.x === Math.floor(size/2) && me.y === size - 2) {
     interactPromptKey = { kind: 'interior_door' };
@@ -1923,25 +2151,33 @@ function renderMinimap() {
   mmCtx.fillRect(0, 0, mmCanvas.width, mmCanvas.height);
   if (!world || interior) return;
   const cellSize = mmCanvas.width / WORLD_SIZE;
-  for (let y = 0; y < WORLD_SIZE; y++) {
-    for (let x = 0; x < WORLD_SIZE; x++) {
-      mmCtx.fillStyle = BIOMES[world[y][x].biome].color;
-      mmCtx.fillRect(x * cellSize, y * cellSize, cellSize + 1, cellSize + 1);
-    }
+  // Only draw explored tiles — fog-of-war
+  for (const key of exploredTiles) {
+    const [sx, sy] = key.split('_');
+    const x = +sx, y = +sy;
+    if (x < 0 || y < 0 || x >= WORLD_SIZE || y >= WORLD_SIZE) continue;
+    const t = world[y]?.[x];
+    if (!t) continue;
+    mmCtx.fillStyle = BIOMES[t.biome].color;
+    mmCtx.fillRect(x * cellSize, y * cellSize, Math.max(1, cellSize + 0.5), Math.max(1, cellSize + 0.5));
   }
-  // your base
+  // your base (only if explored or always shown — always, so you can navigate home)
   if (myBase) {
     mmCtx.fillStyle = '#ffb347';
-    mmCtx.fillRect(myBase.x * cellSize - 1, myBase.y * cellSize - 1, cellSize + 2, cellSize + 2);
+    const s = Math.max(2, cellSize + 2);
+    mmCtx.fillRect(myBase.x * cellSize - 1, myBase.y * cellSize - 1, s, s);
   }
-  // other players
-  for (const p of Object.values(players)) {
-    mmCtx.fillStyle = '#d35454';
-    mmCtx.fillRect(p.x * cellSize, p.y * cellSize, cellSize + 1, cellSize + 1);
+  // Villages you've been near
+  for (const v of VILLAGES) {
+    if (!exploredTiles.has(`${v.x}_${v.y}`)) continue;
+    mmCtx.fillStyle = '#d4a066';
+    const s = Math.max(2, cellSize + 1);
+    mmCtx.fillRect(v.x * cellSize, v.y * cellSize, s, s);
   }
-  // you
+  // you — always drawn on top
   mmCtx.fillStyle = '#7cbd56';
-  mmCtx.fillRect(me.x * cellSize - 1, me.y * cellSize - 1, cellSize + 2, cellSize + 2);
+  const s = Math.max(2, cellSize + 2);
+  mmCtx.fillRect(me.x * cellSize - 1, me.y * cellSize - 1, s, s);
 }
 
 
@@ -1992,7 +2228,9 @@ function wireInput() {
     }
     // click on wildlife adjacent = engage
     for (const [aid, a] of Object.entries(wildlifePlan)) {
-      if (a.x === wx && a.y === wy && !wildlifeDefeats[aid]
+      if (wildlifeDefeats[aid]) continue;
+      const pos = wildlifePositions[aid] || { x: a.x, y: a.y };
+      if (pos.x === wx && pos.y === wy
           && Math.abs(me.x - wx) + Math.abs(me.y - wy) === 1) {
         startWildBattle(aid);
         return;
@@ -2038,9 +2276,11 @@ function tryMove(dx, dy) {
     for (const p of Object.values(players)) {
       if (p.x === nx && p.y === ny) return;
     }
-    // block wildlife (engage instead)
+    // block wildlife at their current roam position (engage instead)
     for (const [aid, a] of Object.entries(wildlifePlan)) {
-      if (a.x === nx && a.y === ny && !wildlifeDefeats[aid]) return;
+      if (wildlifeDefeats[aid]) continue;
+      const pos = wildlifePositions[aid] || { x: a.x, y: a.y };
+      if (pos.x === nx && pos.y === ny) return;
     }
     me.x = nx; me.y = ny;
     savePosOnly();
@@ -2059,6 +2299,11 @@ function tryInteract() {
   else if (k.kind === 'base_door') enterBase();
   else if (k.kind === 'interior_door') exitBase();
   else if (k.kind === 'equip') handleEquipInteract(k.slotKey);
+  else if (k.kind === 'village') {
+    const v = VILLAGES.find(x => x.id === k.id);
+    if (v) addLog(`entered ${v.name}. talk to villagers with SPACE.`, 'info');
+  }
+  else if (k.kind === 'npc') openNpcDialog(k.id);
 }
 
 function enterBase() {
@@ -2084,19 +2329,34 @@ function handleHarvest(x, y) {
   const tile = world[y][x];
   const res = RESOURCES[tile.resource];
   if (!res) return;
-  // tool requirement
-  if (res.toolType && res.tierReq >= 1) {
-    const bestTool = findBestTool(res.toolType);
-    if (!bestTool || ITEMS[bestTool].tier < res.tierReq) {
-      addLog(`need a tier ${res.tierReq} ${res.toolType} for ${res.name}`, 'bad');
-      return;
-    }
+
+  const bestTool = res.toolType ? findBestTool(res.toolType) : null;
+  const toolTier = bestTool ? (ITEMS[bestTool].tier || 0) : 0;
+
+  // Hard gate: tier 2+ (copper/iron ore) requires matching tier tool
+  if (res.tierReq >= 2 && toolTier < res.tierReq) {
+    addLog(`need a tier ${res.tierReq} ${res.toolType} for ${res.name} (bare hands can't crack it)`, 'bad');
+    return;
   }
+
+  // Base yield by (tool tier, resource). Bare hands = tier 0.
+  // Trees:  0→2, 1→4, 2→6, 3→8
+  // Rocks:  0→1, 1→3, 2→5, 3→7
+  // Berry:  always 2
+  // Copper: 1→1, 2→2, 3→3   (tier 2+ gated above)
+  // Iron:   3→2             (tier 3 gated above)
   let amt = res.amount;
-  const t = findBestTool(res.toolType);
-  if (t && ITEMS[t].bonus && ITEMS[t].bonus.resource === res.drops) amt += ITEMS[t].bonus.amt;
+  if (res.drops === 'wood')        amt = 2 + toolTier * 2;
+  else if (res.drops === 'stone')  amt = Math.max(1, 1 + toolTier * 2);
+  else if (res.drops === 'food')   amt = 2;  // berries don't use tools
+  else if (res.drops === 'copper') amt = toolTier;  // 1/2/3
+  else if (res.drops === 'iron')   amt = (toolTier >= 3 ? 2 : 0);
+
+  if (amt <= 0) { addLog(`can't harvest ${res.name} with what you have.`, 'bad'); return; }
+
   me.inventory[res.drops] = (me.inventory[res.drops] || 0) + amt;
-  addLog(`+${amt} ${ITEMS[res.drops].name}`, 'good');
+  const toolMsg = bestTool ? ` (${ITEMS[bestTool].name})` : ' (bare hands)';
+  addLog(`+${amt} ${ITEMS[res.drops].name}${toolMsg}`, 'good');
   depletedResources[`${x}_${y}`] = Date.now();
   update(ref(db, `depleted/${x}_${y}`), Date.now());
   savePlayer();
@@ -2660,7 +2920,7 @@ function openFastTravelModal() {
     bodyHTML: '<div style="text-align:center">🌀</div><div style="text-align:center;margin:10px">Teleport to the center of the world (coord 60,60) for 50g.</div>',
     buttons: [
       { label: 'Travel (-50g)', primary: true, disabled: me.gold < 50, fn: () => {
-        me.gold -= 50; me.x = 60; me.y = 60; interior = false;
+        me.gold -= 50; me.x = 180; me.y = 180; interior = false;
         savePlayer(); savePosOnly(); closeModal(); refreshAllPanels(); renderWorld(); renderMinimap();
         addLog('teleported.', 'good');
       }},
@@ -2832,6 +3092,9 @@ function openBattleModal() {
     bodyHTML, wide: true,
     buttons: [],
     onBody: () => {
+      // Hide the X close button during active battle; re-show at 'end'
+      const xBtn = document.getElementById('modal-close');
+      if (xBtn) xBtn.style.visibility = (activeBattle && activeBattle.phase !== 'end') ? 'hidden' : 'visible';
       renderBattleActions();
       // party mini-slot click = switch
       document.querySelectorAll('.party-mini-slot[data-idx]').forEach(el => {
@@ -3146,6 +3409,10 @@ function executeMove(attacker, atkSide, moveKey, cb) {
       // Wild or PvP: award XP to our active
       const winner = b.mySide.party[b.mySide.activeIdx];
       if (winner.hp > 0) awardXp(winner, defender);
+      // Quest progress: defeat-type quests tick on species element
+      if (defender.species && !defender.species.startsWith('_')) {
+        tickQuestProgress('defeat_species', defender.species);
+      }
       if (b.kind === 'wild') {
         const anchorId = b.enemySide.party[0].anchorId;
         if (anchorId) { wildlifeDefeats[anchorId] = Date.now(); update(ref(db, `wildlifeDefeats/${anchorId}`), Date.now()); }
@@ -3656,6 +3923,318 @@ setInterval(() => {
     if (Date.now() >= me.eggs[eggId].hatchAt) tryHatch(eggId);
   }
 }, 5000);
+
+
+// ============================================================
+// CHARACTER CUSTOMIZATION
+// ============================================================
+const APPEARANCE_OPTIONS = {
+  gender: ['male', 'female', 'other'],
+  skin:   ['light', 'medium_light', 'medium', 'medium_dark', 'dark'],
+  hair:   ['blonde', 'brown', 'black', 'red', 'gray'],
+  shirt:  ['red', 'blue', 'green', 'yellow', 'purple', 'gray']
+};
+
+// Map to closest emoji. We can't customize all attributes perfectly,
+// but we pick the best matching person emoji based on gender + skin.
+// Skin uses the Fitzpatrick modifier range.
+const SKIN_MODIFIERS = {
+  light: '\u{1F3FB}', medium_light: '\u{1F3FC}', medium: '\u{1F3FD}',
+  medium_dark: '\u{1F3FE}', dark: '\u{1F3FF}'
+};
+function buildPlayerGlyph(a) {
+  if (!a) return '🧑';
+  const skinMod = SKIN_MODIFIERS[a.skin] || SKIN_MODIFIERS.medium;
+  // Base person emoji by gender
+  let base;
+  if (a.gender === 'female') base = '\u{1F469}';       // 👩
+  else if (a.gender === 'male') base = '\u{1F468}';    // 👨
+  else base = '\u{1F9D1}';                              // 🧑 (person)
+  // Hair color ZWJ modifiers (only for male/female)
+  const ZWJ = '\u200D';
+  const hairEmoji = {
+    red: '\u{1F9B0}', brown: null, blonde: '\u{1F9B1}', black: null, gray: '\u{1F9B3}'
+  }[a.hair];
+  let glyph = base + skinMod;
+  if (hairEmoji && (a.gender === 'male' || a.gender === 'female')) {
+    glyph += ZWJ + hairEmoji;
+  }
+  return glyph;
+}
+
+function openCharacterCustomization(isFirst) {
+  const a = me.appearance || { gender: 'male', skin: 'medium', hair: 'brown', shirt: 'blue' };
+  const render = () => {
+    const glyph = buildPlayerGlyph(a);
+    const body = document.getElementById('modal-body');
+    body.innerHTML = `
+      <div style="text-align:center;font-size:80px;margin:10px 0;line-height:1">${glyph}</div>
+      <div style="font-size:11px;color:var(--text-dim);text-align:center;margin-bottom:14px">this is how other players see you on the map</div>
+      <div class="section-title">Gender</div>
+      <div class="battle-main-grid" id="g-gender">
+        ${APPEARANCE_OPTIONS.gender.map(g => `<button class="btn ${a.gender===g?'primary':''}" data-v="${g}">${g}</button>`).join('')}
+      </div>
+      <div class="section-title" style="margin-top:12px">Skin</div>
+      <div class="battle-main-grid" id="g-skin" style="grid-template-columns:repeat(5,1fr)">
+        ${APPEARANCE_OPTIONS.skin.map(s => `<button class="btn ${a.skin===s?'primary':''}" data-v="${s}">${s.replace('_',' ')}</button>`).join('')}
+      </div>
+      <div class="section-title" style="margin-top:12px">Hair</div>
+      <div class="battle-main-grid" id="g-hair" style="grid-template-columns:repeat(5,1fr)">
+        ${APPEARANCE_OPTIONS.hair.map(h => `<button class="btn ${a.hair===h?'primary':''}" data-v="${h}">${h}</button>`).join('')}
+      </div>
+      <div class="section-title" style="margin-top:12px">Shirt (cosmetic — shown on profile)</div>
+      <div class="battle-main-grid" id="g-shirt" style="grid-template-columns:repeat(6,1fr)">
+        ${APPEARANCE_OPTIONS.shirt.map(s => `<button class="btn ${a.shirt===s?'primary':''}" data-v="${s}" style="background:var(--t-${s}, ${s});color:#000">${s}</button>`).join('')}
+      </div>
+    `;
+    // Wire option clicks
+    ['gender','skin','hair','shirt'].forEach(key => {
+      document.querySelectorAll(`#g-${key} button`).forEach(btn => {
+        btn.addEventListener('click', () => { a[key] = btn.dataset.v; render(); });
+      });
+    });
+  };
+  const saveAndClose = () => {
+    me.appearance = a;
+    me.glyph = buildPlayerGlyph(a);
+    me.needsCustomization = false;
+    savePlayer(); savePosOnly();
+    // Manually close — we bypass the battle guard since this is not a battle
+    const bg = document.getElementById('modal-bg');
+    bg.classList.remove('open');
+    _modalCtx = null;
+    addLog('appearance updated.', 'good');
+    renderWorld();
+  };
+  openModal({
+    title: isFirst ? 'Welcome! Customize your character' : 'Customize Character',
+    bodyHTML: '<div>loading…</div>',
+    wide: true,
+    buttons: [
+      { label: 'Save', primary: true, fn: saveAndClose },
+      isFirst ? null : { label: 'Cancel', fn: () => { const bg=document.getElementById('modal-bg'); bg.classList.remove('open'); _modalCtx=null; } }
+    ].filter(Boolean),
+    onBody: render
+  });
+  // Hide X on first-time customization (force completion)
+  if (isFirst) {
+    const xBtn = document.getElementById('modal-close');
+    if (xBtn) xBtn.style.visibility = 'hidden';
+  }
+}
+
+// Expose on stats page — add a button
+function injectCustomizeButton() {
+  const statsTab = document.getElementById('tab-stats');
+  if (!statsTab || document.getElementById('btn-customize')) return;
+  const homeBtn = document.getElementById('btn-home');
+  if (!homeBtn) return;
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.id = 'btn-customize';
+  btn.style.cssText = 'width:100%;margin-top:6px';
+  btn.textContent = 'Customize Character';
+  btn.addEventListener('click', () => openCharacterCustomization(false));
+  homeBtn.parentElement.appendChild(btn);
+}
+// Inject shortly after startGame (called from the existing refreshAllPanels flow)
+setTimeout(() => { if (me) injectCustomizeButton(); }, 500);
+
+// ============================================================
+// NPC DIALOG & QUESTS
+// ============================================================
+function findNpc(id) {
+  for (const v of VILLAGES) {
+    const n = v.npcs.find(x => x.id === id);
+    if (n) return { npc: n, village: v };
+  }
+  return null;
+}
+
+function openNpcDialog(npcId) {
+  const found = findNpc(npcId);
+  if (!found) return;
+  const { npc, village } = found;
+  me.quests = me.quests || {};
+  const qState = me.quests[npcId];  // undefined | {state:'active',progress}| {state:'done'}
+  const quest = npc.quest;
+
+  let bodyHTML = `<div style="text-align:center;font-size:48px;margin:6px 0">${npc.glyph}</div>
+    <div style="text-align:center;font-weight:700;color:var(--amber)">${npc.name}</div>
+    <div style="text-align:center;font-size:10px;color:var(--text-dim);margin-bottom:12px">${village.name}</div>
+    <div style="font-style:italic;color:var(--text-dim);margin-bottom:12px">"${npc.dialogue}"</div>`;
+
+  const buttons = [];
+
+  if (!qState) {
+    // Offer quest
+    bodyHTML += `<div class="section-title">Request</div>
+      <div style="font-size:12px;margin-bottom:8px">${quest.description}</div>
+      <div style="font-size:11px;color:var(--amber)">Reward: ${formatQuestReward(quest.reward)}</div>`;
+    buttons.push({ label: 'Accept Quest', primary: true, fn: () => {
+      me.quests[npcId] = { state: 'active', progress: 0, type: quest.type };
+      addLog(`accepted "${quest.description}" from ${npc.name}`, 'system');
+      savePlayer();
+      // For battle quest, start fight immediately
+      if (quest.type === 'battle') startNpcBattle(npc);
+      else closeModalForce();
+    }});
+    buttons.push({ label: 'Decline', fn: closeModalForce });
+  } else if (qState.state === 'active') {
+    // Check completion
+    const ready = questIsReady(npc, qState);
+    if (ready) {
+      bodyHTML += `<div class="section-title">Quest complete!</div>
+        <div style="font-size:12px;color:var(--green);margin-bottom:8px">You've done what they asked.</div>
+        <div style="font-size:11px;color:var(--amber)">Claim: ${formatQuestReward(quest.reward)}</div>`;
+      buttons.push({ label: 'Claim Reward', primary: true, fn: () => {
+        completeQuest(npc);
+        closeModalForce();
+      }});
+    } else {
+      const progTxt = questProgressText(npc, qState);
+      bodyHTML += `<div class="section-title">Quest in progress</div>
+        <div style="font-size:12px;margin-bottom:4px">${quest.description}</div>
+        <div style="font-size:11px;color:var(--amber)">${progTxt}</div>`;
+      if (quest.type === 'battle') {
+        buttons.push({ label: 'Try Again', primary: true, fn: () => { startNpcBattle(npc); }});
+      }
+      buttons.push({ label: 'Abandon Quest', danger: true, fn: () => {
+        delete me.quests[npcId]; savePlayer(); addLog(`abandoned quest.`, 'bad'); closeModalForce();
+      }});
+    }
+  } else if (qState.state === 'done') {
+    bodyHTML += `<div style="text-align:center;font-size:11px;color:var(--text-dim)">"Thank you for your help before. I have nothing more to ask of you."</div>`;
+  }
+  buttons.push({ label: 'Close', fn: closeModalForce });
+  openModal({ title: npc.name, bodyHTML, buttons });
+}
+
+function closeModalForce() {
+  const bg = document.getElementById('modal-bg');
+  bg.classList.remove('open');
+  _modalCtx = null;
+}
+
+function formatQuestReward(r) {
+  const parts = [];
+  if (r.gold) parts.push(`${r.gold}g`);
+  if (r.egg)  parts.push(`${SPECIES[r.egg].n} egg`);
+  return parts.join(' + ') || '?';
+}
+
+function questIsReady(npc, qState) {
+  const q = npc.quest;
+  if (q.type === 'fetch') return (me.inventory[q.item] || 0) >= q.amount;
+  if (q.type === 'defeat') return (qState.progress || 0) >= q.amount;
+  if (q.type === 'battle') return qState.progress === 1;  // set to 1 when NPC battle won
+  return false;
+}
+
+function questProgressText(npc, qState) {
+  const q = npc.quest;
+  if (q.type === 'fetch')  return `${ITEMS[q.item].icon} ${me.inventory[q.item] || 0} / ${q.amount} ${ITEMS[q.item].name}`;
+  if (q.type === 'defeat') return `${qState.progress || 0} / ${q.amount} ${q.elementType} creatures defeated`;
+  if (q.type === 'battle') return 'Defeat them in creature battle.';
+  return '';
+}
+
+function completeQuest(npc) {
+  const q = npc.quest;
+  const st = me.quests[npc.id];
+  if (!st || !questIsReady(npc, st)) return;
+  // Consume items for fetch
+  if (q.type === 'fetch') {
+    me.inventory[q.item] -= q.amount;
+  }
+  // Apply reward
+  if (q.reward.gold) me.gold += q.reward.gold;
+  if (q.reward.egg) {
+    me.eggs = me.eggs || {};
+    const eggId = `egg_${Date.now()}_${Math.floor(Math.random()*100000)}`;
+    const ivs = { hp: 15+Math.floor(Math.random()*16), atk: 15+Math.floor(Math.random()*16),
+                  def: 15+Math.floor(Math.random()*16), spd: 15+Math.floor(Math.random()*16) };
+    me.eggs[eggId] = { id: eggId, species: q.reward.egg, ivs, hatchAt: Date.now() + EGG_HATCH_MS, parentA: null, parentB: null };
+    addLog(`🥚 received a ${SPECIES[q.reward.egg].n} egg!`, 'good');
+  }
+  me.quests[npc.id] = { state: 'done' };
+  addLog(`quest complete! +${q.reward.gold || 0}g`, 'good');
+  savePlayer(); refreshAllPanels();
+}
+
+// Hook into harvest / battle victory for quest progress
+function tickQuestProgress(kind, payload) {
+  // kind: 'defeat_species' (payload: speciesKey) | 'fetch_noop' (just re-check on inventory) | 'npc_battle_won' (npcId)
+  if (!me.quests) return;
+  if (kind === 'defeat_species') {
+    const sp = SPECIES[payload];
+    if (!sp) return;
+    for (const [npcId, state] of Object.entries(me.quests)) {
+      if (state.state !== 'active') continue;
+      const found = findNpc(npcId);
+      if (!found) continue;
+      const q = found.npc.quest;
+      if (q.type === 'defeat' && q.elementType === sp.t) {
+        state.progress = (state.progress || 0) + 1;
+        addLog(`quest: ${state.progress}/${q.amount} ${q.elementType} creatures`, 'info');
+        if (state.progress >= q.amount) addLog(`return to ${found.npc.name} for your reward!`, 'good');
+      }
+    }
+    savePlayer();
+  }
+  if (kind === 'npc_battle_won') {
+    const state = me.quests[payload];
+    if (state && state.state === 'active') {
+      state.progress = 1;
+      addLog(`defeated the challenger! return to collect.`, 'good');
+      savePlayer();
+    }
+  }
+}
+
+// ============================================================
+// NPC BATTLE — reuse wild battle system
+// ============================================================
+function startNpcBattle(npc) {
+  const q = npc.quest;
+  if (q.type !== 'battle') return;
+  const sp = SPECIES[q.speciesKey];
+  if (!sp) return;
+  const npcCreature = makeCreatureInstance(q.speciesKey, q.lvl);
+  npcCreature.isNpc = true;
+  npcCreature.npcId = npc.id;
+
+  const playerCombat = playerToCombatant();
+  const mySideParty = [playerCombat, ...me.party];
+  let activeIdx = 0;
+  if (playerCombat.hp <= 0) activeIdx = mySideParty.findIndex(c => c.hp > 0);
+  if (activeIdx === -1) { addLog('you are in no shape to fight.', 'bad'); return; }
+
+  activeBattle = {
+    kind: 'wild',   // same mechanics as wild; npc flag only for post-battle hook
+    isNpc: true, npcId: npc.id,
+    mySide: { party: mySideParty, activeIdx },
+    enemySide: { party: [npcCreature], activeIdx: 0 },
+    log: [`${npc.name}'s ${sp.n} (Lv.${q.lvl}) enters the fight!`],
+    turn: 1, awaiting: 'input', phase: 'pick_move',
+    queuedMyMove: null, charging: {}
+  };
+  openBattleModal();
+}
+
+// Wrap the existing _closeBattle to also credit NPC-battle victories
+const _origCloseBattle = window._closeBattle;
+window._closeBattle = () => {
+  const b = activeBattle;
+  if (b && b.isNpc && b.npcId) {
+    // If the NPC creature is defeated, the player wins
+    const enemy = b.enemySide.party[0];
+    if (enemy && enemy.hp <= 0) tickQuestProgress('npc_battle_won', b.npcId);
+  }
+  _origCloseBattle && _origCloseBattle();
+};
+
+// NOTE: defeat-quest tracking is now handled inline in executeMove's "Fainted?" branch.
 
 </script>
 </body>
