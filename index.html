@@ -1492,6 +1492,7 @@ async function attemptEnter() {
         needsCustomization: true,
         lastSeen: Date.now(),
         eggs: {},
+        hasBase: true,
         createdAt: Date.now()
       };
       if (!BIOMES[world[me.y]?.[me.x]?.biome]?.walkable) me.y = newBase.y;
@@ -1505,6 +1506,8 @@ async function attemptEnter() {
       me.seen = me.seen || {};
       me.quests = me.quests || {};
       me.eggs = me.eggs || {};
+      // If they have a saved base, flag hasBase so the UI works
+      if (myBase && typeof me.hasBase === 'undefined') me.hasBase = true;
       me.party.forEach(ensureCreatureSchema);
       Object.values(me.creatureStorage).forEach(ensureCreatureSchema);
     }
@@ -2041,6 +2044,17 @@ function maybeWildEncounter() {
 function tryInteract() {
   if (activeBattle) return;
   if (interior) { tryInteractInterior(); return; }
+  // If no base, allow planting one on an empty walkable tile at player's feet
+  if (!me.hasBase) {
+    const tile = world[me.y]?.[me.x];
+    if (tile && BIOMES[tile.biome]?.walkable && !tile.resource) {
+      plantBaseHere();
+      return;
+    } else {
+      addLog('Find empty walkable ground (not on water, stone, tree, or resource).', 'warn');
+      return;
+    }
+  }
   const tries = [[0,0],[1,0],[-1,0],[0,1],[0,-1]];
   for (const [dx, dy] of tries) {
     const tx = me.x + dx, ty = me.y + dy;
@@ -2052,10 +2066,29 @@ function tryInteract() {
       harvestResource(tx, ty, t);
       return;
     }
-    if (tx === myBase.x && ty === myBase.y) { enterBase(); return; }
+    if (myBase && tx === myBase.x && ty === myBase.y) { enterBase(); return; }
     for (const v of VILLAGES) for (const n of v.npcs) if (n.x === tx && n.y === ty) { openNpcDialogue(n, v); return; }
     for (const [pn, p] of Object.entries(players)) if (p.x === tx && p.y === ty) { openPlayerInteract(pn, p); return; }
   }
+}
+
+async function plantBaseHere() {
+  // Create base object at current position
+  const newBase = {
+    x: me.x, y: me.y, level: 1,
+    equipment: { bed: true, workbench: true },
+    structures: {}, farms: {},
+    assignedTrainers: {}, assignedGuardians: {},
+    raidLog: [], lastVisit: Date.now(),
+    pvpDefenseWins: 0
+  };
+  await set(ref(db, `bases/${me.nickname}`), newBase);
+  myBase = newBase;
+  me.hasBase = true;
+  savePlayer();
+  addLog(`Base planted at ${me.x},${me.y}! Press E again to enter.`, 'good');
+  renderAll();
+  renderBasePanel();
 }
 
 function harvestResource(x, y, tile) {
