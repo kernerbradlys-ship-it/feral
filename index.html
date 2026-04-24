@@ -1393,7 +1393,10 @@ function openModal({ title, bodyHTML, buttons, wide = false, onClose = null, onB
   document.getElementById('modal-title').textContent = title || '';
   document.getElementById('modal-body').innerHTML = bodyHTML || '';
   const xBtn = document.getElementById('modal-close');
-  if (xBtn) xBtn.style.visibility = forceOpen ? 'hidden' : 'visible';
+  if (xBtn) {
+    xBtn.style.display = forceOpen ? 'none' : '';
+    xBtn.style.visibility = forceOpen ? 'hidden' : 'visible';
+  }
   const btns = document.getElementById('modal-btns');
   btns.innerHTML = '';
   _modalCtx = { onClose, forceOpen };
@@ -1401,9 +1404,10 @@ function openModal({ title, bodyHTML, buttons, wide = false, onClose = null, onB
     if (!b) return;
     const el = document.createElement('button');
     el.className = 'btn' + (b.primary?' primary':'') + (b.danger?' danger':'');
-    el.textContent = b.label;
+    el.textContent = b.label || b.text || 'OK';
     if (b.disabled) el.disabled = true;
-    el.addEventListener('click', () => { b.fn && b.fn(); });
+    const handler = b.fn || b.onclick;
+    el.addEventListener('click', () => { handler && handler(); });
     btns.appendChild(el);
   });
   bg.classList.add('open');
@@ -2293,6 +2297,7 @@ function renderWorld() {
   const pcx = half * ts + ts/2, pcy = half * ts + ts/2;
   ctx.fillStyle = 'rgba(255,179,71,0.3)';
   ctx.beginPath(); ctx.arc(pcx, pcy, ts * 0.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
   ctx.fillText(me.glyph || '🧍', pcx, pcy);
 
   if (phase.darkness > 0.2) {
@@ -2376,6 +2381,7 @@ function renderInterior() {
   const py = (gridOffset + me.interiorY) * ts;
   ctx.fillStyle = 'rgba(255,179,71,0.3)';
   ctx.beginPath(); ctx.arc(px + ts/2, py + ts/2, ts * 0.45, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
   ctx.fillText(me.glyph || '🧍', px + ts/2, py + ts/2);
 }
 
