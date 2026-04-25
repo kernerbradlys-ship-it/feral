@@ -1024,20 +1024,20 @@ const STRUCTURES = {
 // BASE LEVELS + core equipment (workbench, forge, etc)
 // ============================================================
 const BASE_LEVELS = {
-  1: { name:'Hut',       size:7,  upgradeCost:{wood:40, stone:20, gold:50},                                   maxStructures:8,  maxFarms:2, maxTrainers:1, maxGuardians:1, maxTowers:0 },
-  2: { name:'Cabin',     size:9,  upgradeCost:{wood:150, stone:100, copper:30, gold:250},                     maxStructures:16, maxFarms:4, maxTrainers:2, maxGuardians:2, maxTowers:2 },
-  3: { name:'Longhouse', size:11, upgradeCost:{wood:400, stone:300, copper:100, iron:50, gold:750},           maxStructures:26, maxFarms:6, maxTrainers:3, maxGuardians:4, maxTowers:4 },
+  1: { name:'Hut',       size:7,  upgradeCost:{wood:40, stone:20, gold:50},                                    maxStructures:8,  maxFarms:2, maxTrainers:1, maxGuardians:1, maxTowers:0 },
+  2: { name:'Cabin',     size:9,  upgradeCost:{wood:150, stone:100, food:30, gold:250},                        maxStructures:16, maxFarms:4, maxTrainers:2, maxGuardians:2, maxTowers:2 },
+  3: { name:'Longhouse', size:11, upgradeCost:{wood:400, stone:300, copper:60, iron:20, gold:750},             maxStructures:26, maxFarms:6, maxTrainers:3, maxGuardians:4, maxTowers:4 },
   4: { name:'Keep',      size:13, upgradeCost:{wood:1000, stone:800, iron:200, crystal:5, goldbar:3, gold:2000}, maxStructures:40, maxFarms:10, maxTrainers:5, maxGuardians:6, maxTowers:8 },
 };
 
 const CORE_EQUIPMENT = {
   bed:           { icon:'🛏️', name:'Bed',          tier:1, cost:{wood:8} },
   workbench:     { icon:'🔨', name:'Workbench',    tier:1, cost:{wood:12, stone:6} },
-  forge:         { icon:'🔥', name:'Forge',        tier:2, cost:{stone:20, wood:10, copper:5} },
-  alchemy:       { icon:'⚗️', name:'Alchemy Bench',tier:3, cost:{wood:15, herb:10, crystal:2} },
+  forge:         { icon:'🔥', name:'Forge',        tier:2, cost:{stone:30, wood:15} },
+  alchemy:       { icon:'⚗️', name:'Alchemy Bench',tier:3, cost:{wood:15, herb:10, copper:8} },
   storage:       { icon:'📦', name:'Storage Chest',tier:1, cost:{wood:15} },
   breeding:      { icon:'💕', name:'Breeding Pen', tier:2, cost:{wood:20, stone:10, food:15} },
-  incubator:     { icon:'🥚', name:'Incubator',    tier:2, cost:{wood:10, stone:5, copper:3} },
+  incubator:     { icon:'🥚', name:'Incubator',    tier:2, cost:{wood:10, stone:5} },
   map_table:     { icon:'🗺️', name:'Map Table',    tier:3, cost:{wood:15, iron:5, goldbar:1} },
   research:      { icon:'📚', name:'Research Desk',tier:3, cost:{wood:12, crystal:2, gold:300} },
 };
@@ -1055,10 +1055,11 @@ const RECIPES = {
   potion:      { name:'Potion',      icon:'🧴', station:'workbench', tierReq:1, cost:{food:4, herb:2} },
   seed_berry:  { name:'Berry Seed',  icon:'🌱', station:'workbench', tierReq:1, cost:{food:3} },
   seed_wheat:  { name:'Wheat Seed',  icon:'🌾', station:'workbench', tierReq:2, cost:{food:5, gold:10} },
-  // T2 Forge — uses STONE for copper tools (fixes deadlock)
-  copper_axe:   { name:'Copper Axe',   icon:'🪓', station:'forge', tierReq:2, cost:{wood:8,  stone:5, copper:3} },
-  copper_pick:  { name:'Copper Pick',  icon:'⛏️', station:'forge', tierReq:2, cost:{wood:8,  stone:6, copper:4} },
-  copper_sword: { name:'Copper Sword', icon:'⚔️', station:'forge', tierReq:2, cost:{wood:5,  stone:4, copper:6} },
+  // GATEWAY — copper_pick at workbench, no copper needed (uses extra stone). This breaks the deadlock.
+  copper_pick:  { name:'Copper Pick',  icon:'⛏️', station:'workbench', tierReq:1, cost:{wood:10, stone:15, gold:30} },
+  // T2 Forge — full copper tier (now reachable since you can mine copper with the workbench-crafted pick)
+  copper_axe:   { name:'Copper Axe',   icon:'🪓', station:'forge', tierReq:2, cost:{wood:8,  copper:4} },
+  copper_sword: { name:'Copper Sword', icon:'⚔️', station:'forge', tierReq:2, cost:{wood:5,  copper:6} },
   // T3 Forge — uses COPPER for iron tools
   iron_axe:   { name:'Iron Axe',   icon:'🪓', station:'forge', tierReq:3, cost:{wood:10, copper:6, iron:4} },
   iron_pick:  { name:'Iron Pick',  icon:'⛏️', station:'forge', tierReq:3, cost:{wood:10, copper:8, iron:5} },
@@ -2124,21 +2125,26 @@ function harvestResource(x, y, tile) {
 
 function computePlayerToolTier(type) {
   let best = 0;
-  for (const [k, amt] of Object.entries(me.tools || {})) {
-    if (!amt || amt <= 0) continue;
-    const it = ITEMS[k];
-    if (!it || !it.tool) continue;
-    if (it.toolType === type && it.tier > best) best = it.tier;
+  // Check both buckets - crafted tools land in inventory, starter/legacy tools in tools
+  for (const bucket of [me.tools, me.inventory]) {
+    for (const [k, amt] of Object.entries(bucket || {})) {
+      if (!amt || amt <= 0) continue;
+      const it = ITEMS[k];
+      if (!it || !it.tool) continue;
+      if (it.toolType === type && it.tier > best) best = it.tier;
+    }
   }
   return best;
 }
 function findBestTool(type) {
   let best = null;
-  for (const [k, amt] of Object.entries(me.tools || {})) {
-    if (!amt || amt <= 0) continue;
-    const it = ITEMS[k];
-    if (!it || !it.tool) continue;
-    if (it.toolType === type && (!best || it.tier > best.tier)) best = it;
+  for (const bucket of [me.tools, me.inventory]) {
+    for (const [k, amt] of Object.entries(bucket || {})) {
+      if (!amt || amt <= 0) continue;
+      const it = ITEMS[k];
+      if (!it || !it.tool) continue;
+      if (it.toolType === type && (!best || it.tier > best.tier)) best = it;
+    }
   }
   return best;
 }
