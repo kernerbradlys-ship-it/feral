@@ -3516,8 +3516,8 @@ function tryRest() {
 
 function returnToSpawn() {
   if (!confirm('Return to spawn? Cost: 20% of current gold.')) return;
-  const cost = Math.floor(me.gold * 0.2);
-  me.gold -= cost;
+  const cost = Math.floor((me.gold || 0) * 0.2);
+  invRemove('gold', cost);
   me.x = 180 + randInt(-3, 3);
   me.y = 180 + randInt(-3, 3);
   me.insideBase = null;
@@ -3568,7 +3568,7 @@ function renderInventoryPanel() {
 function openItemMenu(key) {
   const it = ITEMS[key];
   if (!it) return;
-  const qty = me.inv[key] || 0;
+  const qty = invHave(key);
   const isEquippable = ['tool','weapon','armor'].includes(it.type) || ['pickaxe','axe','sword','net','rod','bow','armor'].includes(it.slot);
   const isEquipped = Object.values(me.equip || {}).includes(key);
   let buttons = [];
@@ -3604,7 +3604,7 @@ function recomputeArmor() {
 
 function useItem(key) {
   const it = ITEMS[key];
-  if (!it || !(me.inv[key] > 0)) return;
+  if (!it || invHave(key) <= 0) return;
   const lvl = levelFromXp(me.xp);
   const maxHp = 80 + lvl * 12 + (me.armorBonus || 0);
   if (it.heal) {
@@ -3616,8 +3616,7 @@ function useItem(key) {
     for (const c of me.party) { c.status = null; c.statusTurnsLeft = 0; }
     addLog('Status effects cleared from party.', 'good');
   }
-  me.inv[key]--;
-  if (me.inv[key] <= 0) delete me.inv[key];
+  invRemove(key, 1);
   savePlayer();
   renderInventoryPanel();
   renderStatsPanel();
@@ -3967,10 +3966,11 @@ function openCraftStation(stationKey) {
     if (!it) continue;
     const costHTML = Object.entries(r.cost).map(([ck, cq]) => {
       const cit = ITEMS[ck];
-      const have = me.inv[ck] || 0;
-      return `<span class="cost-tag ${have >= cq ? 'ok' : 'bad'}">${cit?.emoji || ''}${cit?.n || ck} ${have}/${cq}</span>`;
+      const have = invHave(ck);
+      const emoji = ck === 'gold' ? '💰' : (cit?.emoji || '');
+      return `<span class="cost-tag ${have >= cq ? 'ok' : 'bad'}">${emoji}${cit?.n || ck} ${have}/${cq}</span>`;
     }).join(' ');
-    const canCraft = Object.entries(r.cost).every(([ck, cq]) => (me.inv[ck] || 0) >= cq);
+    const canCraft = canAfford(r.cost);
     const lvl = levelFromXp(me.xp);
     const lvlOk = !r.lvlReq || lvl >= r.lvlReq;
     html += `
@@ -4003,18 +4003,13 @@ function openCraftStation(stationKey) {
 function craftItem(itemKey) {
   const r = RECIPES[itemKey];
   if (!r) return;
-  for (const [ck, cq] of Object.entries(r.cost)) {
-    if ((me.inv[ck] || 0) < cq) {
-      addLog('Not enough materials.', 'warn');
-      return;
-    }
+  if (!canAfford(r.cost)) {
+    addLog('Not enough materials.', 'warn');
+    return;
   }
-  for (const [ck, cq] of Object.entries(r.cost)) {
-    me.inv[ck] -= cq;
-    if (me.inv[ck] <= 0) delete me.inv[ck];
-  }
+  payCost(r.cost);
   const qty = r.qty || 1;
-  me.inv[itemKey] = (me.inv[itemKey] || 0) + qty;
+  invAdd(itemKey, qty);
   me.xp += (r.xp || 10);
   addLog(`Crafted ${ITEMS[itemKey]?.n} x${qty}. +${r.xp || 10} XP`, 'good');
   savePlayer();
@@ -4092,7 +4087,7 @@ function renderBasePanel() {
   let sgHTML = '';
   for (const [key, sdef] of Object.entries(STRUCTURES)) {
     if (sdef.minBaseLevel && lvl < sdef.minBaseLevel) continue;
-    const costHTML = Object.entries(sdef.cost).map(([k,v]) => { const it = ITEMS[k]; const have = me.inv[k]||0; return `<span class="cost-tag tiny ${have>=v?'ok':'bad'}">${it?.emoji||''}${v}</span>`; }).join('');
+    const costHTML = Object.entries(sdef.cost).map(([k,v]) => { const it = ITEMS[k]; const have = invHave(k); const emoji = k === 'gold' ? '💰' : (it?.emoji||''); return `<span class="cost-tag tiny ${have>=v?'ok':'bad'}">${emoji}${v}</span>`; }).join('');
     sgHTML += `<div class="struct-card" data-struct="${key}">
       <div class="struct-emoji">${sdef.emoji}</div>
       <div class="struct-name">${sdef.name}</div>
@@ -4162,15 +4157,9 @@ function tryPlaceStructure(ix, iy) {
     const count = Object.values(myBase.structures || {}).filter(s => STRUCTURES[s.type]?.kind === 'tower').length;
     if (count >= (lvlDef.maxTowers || 0)) { addLog('Tower cap reached.', 'warn'); _pendingStructure = null; showHint(''); return false; }
   }
-  // Check cost
-  for (const [ck, cq] of Object.entries(sdef.cost)) {
-    if ((me.inv[ck] || 0) < cq) { addLog('Not enough materials.', 'warn'); _pendingStructure = null; showHint(''); return false; }
-  }
-  // Pay
-  for (const [ck, cq] of Object.entries(sdef.cost)) {
-    me.inv[ck] -= cq;
-    if (me.inv[ck] <= 0) delete me.inv[ck];
-  }
+  // Check + pay cost via unified helpers (handles gold automatically)
+  if (!canAfford(sdef.cost)) { addLog('Not enough materials.', 'warn'); _pendingStructure = null; showHint(''); return false; }
+  payCost(sdef.cost);
   if (!myBase.structures) myBase.structures = {};
   myBase.structures[tileKey] = { type: typeKey, hp: sdef.hp || 100, placedAt: Date.now() };
   recomputeBaseCaps();
@@ -4242,8 +4231,7 @@ function openInstallEquipment() {
           if (!myBase.equipment) myBase.equipment = {};
           const slotKey = 'slot' + (installed + 1);
           myBase.equipment[slotKey] = k;
-          me.inv[k]--;
-          if (me.inv[k] <= 0) delete me.inv[k];
+          invRemove(k, 1);
           saveBase(); savePlayer();
           addLog(`Installed ${ITEMS[k].n}.`, 'good');
           closeModal();
@@ -4256,8 +4244,7 @@ function openInstallEquipment() {
 
 function relocateBase() {
   if (!confirm(`Relocate base? Cost: ${BASE_MOVE_COST_GOLD}g. All structures destroyed.`)) return;
-  if (me.gold < BASE_MOVE_COST_GOLD) { addLog('Not enough gold.', 'warn'); return; }
-  me.gold -= BASE_MOVE_COST_GOLD;
+  if (!invRemove('gold', BASE_MOVE_COST_GOLD)) { addLog('Not enough gold.', 'warn'); return; }
   me.hasBase = false;
   myBase = null;
   remove(ref(db, `bases/${me.nickname}`));
@@ -4638,13 +4625,12 @@ function openNpcDialogue(npc, village) {
     bodyHTML += `<div class="quest-box"><div><b>${q.title}</b> (in progress)</div><div class="small">Defeat the ${q.enemySpecies ? SPECIES[q.enemySpecies]?.n : 'target'}.</div></div>`;
     buttons.push({ text: 'Fight!', primary: true, onclick: () => { closeModal(); startNpcBattle(npc, village); }});
   } else if (q && q.kind === 'fetch') {
-    const have = me.inv[q.item] || 0;
+    const have = invHave(q.item);
     bodyHTML += `<div class="quest-box"><div><b>${q.title}</b></div><div>Progress: ${have}/${q.qty} ${ITEMS[q.item]?.n || q.item}</div></div>`;
     if (have >= q.qty) {
       buttons.push({ text: 'Turn In', primary: true, onclick: () => {
-        me.inv[q.item] -= q.qty;
-        if (me.inv[q.item] <= 0) delete me.inv[q.item];
-        if (q.reward.gold) { me.gold += q.reward.gold; addLog(`+${q.reward.gold}g`, 'good'); }
+        invRemove(q.item, q.qty);
+        if (q.reward.gold) { invAdd('gold', q.reward.gold); addLog(`+${q.reward.gold}g`, 'good'); }
         if (q.reward.egg && SPECIES[q.reward.egg]) {
           const eid = 'egg_' + Date.now();
           me.eggs[eid] = { species: q.reward.egg, hatchAt: Date.now() + EGG_HATCH_MS, ivs: { hp:randInt(10,25), atk:randInt(10,25), def:randInt(10,25), spd:randInt(10,25) } };
@@ -4689,9 +4675,8 @@ function openShop(npc) {
         n.onclick = () => {
           const k = n.dataset.buy;
           const price = npc.shop[k];
-          if (me.gold < price) { addLog('Not enough gold.', 'warn'); return; }
-          me.gold -= price;
-          me.inv[k] = (me.inv[k] || 0) + 1;
+          if (!invRemove('gold', price)) { addLog('Not enough gold.', 'warn'); return; }
+          invAdd(k, 1);
           addLog(`Bought ${ITEMS[k].n}. -${price}g`, 'good');
           savePlayer();
           renderStatsPanel();
