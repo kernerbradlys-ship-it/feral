@@ -391,6 +391,13 @@
     padding: 4px 8px;
   }
   .modal-body { padding: 16px; overflow-y: auto; flex: 1; }
+  /* Battle input lock: when phase is resolving, no buttons can be clicked */
+  .modal.battle-locked .battle-action-bar button,
+  .modal.battle-locked .battle-action-bar .btn,
+  .modal.battle-locked .battle-moves button,
+  .modal.battle-locked .battle-moves .btn,
+  .modal.battle-locked .battle-party-pick button,
+  .modal.battle-locked .battle-party-pick .btn { pointer-events: none; opacity: 0.55; cursor: wait; }
   .modal-btns {
     padding: 12px 16px; border-top: 1px solid var(--border);
     display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap;
@@ -1111,6 +1118,76 @@ function calcStat(kind, base, iv, lvl) {
 }
 
 // ============================================================
+// UNIFIED INVENTORY LAYER
+// All item reads/writes go through these helpers.
+// `me.inv` is the single source of truth for item counts.
+// `me.gold` is currency, kept separate.
+// `me.equip` is the equipped slot map.
+// ============================================================
+function consolidateInventory(p) {
+  // Idempotent: merge legacy me.tools + me.inventory into me.inv, then drop the old buckets.
+  if (!p.inv || typeof p.inv !== 'object') p.inv = {};
+  if (p.inventory && typeof p.inventory === 'object') {
+    for (const [k, v] of Object.entries(p.inventory)) {
+      const n = Number(v) || 0;
+      if (n > 0) p.inv[k] = (p.inv[k] || 0) + n;
+    }
+    delete p.inventory;
+  }
+  if (p.tools && typeof p.tools === 'object') {
+    for (const [k, v] of Object.entries(p.tools)) {
+      const n = Number(v) || 0;
+      if (n > 0) p.inv[k] = (p.inv[k] || 0) + n;
+    }
+    delete p.tools;
+  }
+  // Drop any non-positive entries
+  for (const [k, v] of Object.entries(p.inv)) {
+    if (!v || v <= 0 || isNaN(v)) delete p.inv[k];
+  }
+  // Make sure equip exists
+  if (!p.equip || typeof p.equip !== 'object') p.equip = {};
+  // Make sure gold is a clean number
+  if (typeof p.gold !== 'number' || isNaN(p.gold) || p.gold < 0) p.gold = 0;
+}
+function invHave(key) {
+  if (!me) return 0;
+  if (key === 'gold') return me.gold || 0;
+  return (me.inv && me.inv[key]) || 0;
+}
+function invAdd(key, qty = 1) {
+  if (!me) return;
+  if (qty <= 0) return;
+  if (key === 'gold') { me.gold = (me.gold || 0) + qty; return; }
+  if (!me.inv) me.inv = {};
+  me.inv[key] = (me.inv[key] || 0) + qty;
+}
+function invRemove(key, qty = 1) {
+  if (!me) return false;
+  if (key === 'gold') {
+    if ((me.gold || 0) < qty) return false;
+    me.gold -= qty; return true;
+  }
+  if (!me.inv || (me.inv[key] || 0) < qty) return false;
+  me.inv[key] -= qty;
+  if (me.inv[key] <= 0) delete me.inv[key];
+  return true;
+}
+function canAfford(cost) {
+  if (!cost) return true;
+  for (const [k, v] of Object.entries(cost)) {
+    if (invHave(k) < v) return false;
+  }
+  return true;
+}
+function payCost(cost) {
+  if (!cost) return true;
+  if (!canAfford(cost)) return false;
+  for (const [k, v] of Object.entries(cost)) invRemove(k, v);
+  return true;
+}
+
+// ============================================================
 // WORLD GENERATION
 // ============================================================
 function generateWorld(seed) {
@@ -1497,11 +1574,10 @@ async function attemptEnter() {
         createdAt: Date.now()
       };
       if (!BIOMES[world[me.y]?.[me.x]?.biome]?.walkable) me.y = newBase.y;
+      consolidateInventory(me);
       await set(playerRef, me);
     } else {
       // migrate / ensure fields
-      me.inventory = me.inventory || { wood:0, stone:0, food:0, herb:0 };
-      me.tools = me.tools || {};
       me.party = me.party || [];
       me.creatureStorage = me.creatureStorage || {};
       me.seen = me.seen || {};
@@ -1509,7 +1585,7 @@ async function attemptEnter() {
       me.eggs = me.eggs || {};
       // If they have a saved base, flag hasBase so the UI works
       if (myBase && typeof me.hasBase === 'undefined') me.hasBase = true;
-      // Sanitize player HP — NaN passes typeof number check, so explicit isNaN guard
+      // Sanitize player core stats
       if (typeof me.lvl !== 'number' || isNaN(me.lvl)) me.lvl = 1;
       if (typeof me.maxHp !== 'number' || isNaN(me.maxHp) || me.maxHp <= 0) me.maxHp = 80 + me.lvl * 12;
       if (typeof me.hp !== 'number' || isNaN(me.hp) || me.hp < 0 || me.hp > me.maxHp) me.hp = me.maxHp;
@@ -1519,9 +1595,8 @@ async function attemptEnter() {
       Object.values(me.creatureStorage).forEach(ensureCreatureSchema);
     }
 
-    // CRITICAL: alias inv <-> inventory so all code paths touch the same object
-    // (existing harvest code writes to me.inventory, new UI code reads me.inv)
-    me.inv = me.inventory;
+    // CONSOLIDATED INVENTORY — single source of truth (must run on both fresh + migrated)
+    consolidateInventory(me);
 
     // Fetch / migrate base
     const baseRef = ref(db, `bases/${nick}`);
@@ -1688,12 +1763,11 @@ function simulateOfflineRaid() {
     // Steal resources
     const stolen = {};
     for (const k of ['wood','stone','copper','iron','food','gold']) {
-      const have = k === 'gold' ? me.gold : (me.inventory[k] || 0);
+      const have = invHave(k);
       if (have > 0) {
         const amt = Math.min(have, Math.floor(have * 0.15));
         if (amt > 0) {
-          if (k === 'gold') me.gold -= amt;
-          else me.inventory[k] -= amt;
+          invRemove(k, amt);
           stolen[k] = amt;
         }
       }
@@ -1807,10 +1881,38 @@ function subscribeWorld() {
 function savePlayer() {
   if (!db || !nickname || !me) return;
   me.exploredCSV = [...exploredTiles].slice(-8000).join(',');
-  // Clone, then delete the runtime alias so .inv and .inventory don't get saved as separate copies
+  // Defensive: never persist NaN to Firebase, it bricks saves
+  sanitizePlayerForSave(me);
   const payload = JSON.parse(JSON.stringify(me));
-  delete payload.inv;
+  // Strip legacy duplicate buckets in case anything wrote to them
+  delete payload.inventory;
+  delete payload.tools;
   update(ref(db, `players/${nickname}`), payload);
+}
+function sanitizePlayerForSave(p) {
+  if (typeof p.hp !== 'number' || isNaN(p.hp)) p.hp = p.maxHp || 100;
+  if (typeof p.maxHp !== 'number' || isNaN(p.maxHp) || p.maxHp <= 0) p.maxHp = 100;
+  if (p.hp < 0) p.hp = 0;
+  if (p.hp > p.maxHp) p.hp = p.maxHp;
+  if (typeof p.lvl !== 'number' || isNaN(p.lvl)) p.lvl = 1;
+  if (typeof p.xp !== 'number' || isNaN(p.xp)) p.xp = 0;
+  if (typeof p.gold !== 'number' || isNaN(p.gold)) p.gold = 0;
+  if (typeof p.x !== 'number' || isNaN(p.x)) p.x = 180;
+  if (typeof p.y !== 'number' || isNaN(p.y)) p.y = 180;
+  // Sanitize creatures
+  if (Array.isArray(p.party)) p.party.forEach(sanitizeCreatureForSave);
+  if (p.creatureStorage) Object.values(p.creatureStorage).forEach(sanitizeCreatureForSave);
+}
+function sanitizeCreatureForSave(c) {
+  if (!c) return;
+  if (typeof c.lvl !== 'number' || isNaN(c.lvl) || c.lvl < 1) c.lvl = 1;
+  if (typeof c.xp !== 'number' || isNaN(c.xp)) c.xp = 0;
+  if (typeof c.maxHp !== 'number' || isNaN(c.maxHp) || c.maxHp <= 0) c.maxHp = 20;
+  if (typeof c.hp !== 'number' || isNaN(c.hp) || c.hp < 0 || c.hp > c.maxHp) c.hp = c.maxHp;
+  if (!c.ivs || typeof c.ivs !== 'object') c.ivs = { hp:15, atk:15, def:15, spd:15 };
+  for (const k of ['hp','atk','def','spd']) {
+    if (typeof c.ivs[k] !== 'number' || isNaN(c.ivs[k])) c.ivs[k] = 15;
+  }
 }
 function saveBase() {
   if (!db || !nickname || !myBase) return;
@@ -2119,7 +2221,7 @@ function harvestResource(x, y, tile) {
     const tool = findBestTool(res.toolType);
     if (tool && tool.bonus?.resource === res.drops) amount += tool.bonus.amt;
   }
-  me.inventory[res.drops] = (me.inventory[res.drops] || 0) + amount;
+  invAdd(res.drops, amount);
   addLog(`+${amount} ${ITEMS[res.drops].name}`, 'good');
   flashDamageText(canvas.width/2, canvas.height/2, `+${amount} ${res.drops}`, 'gold');
   const depId = `${x}_${y}`;
@@ -2131,26 +2233,23 @@ function harvestResource(x, y, tile) {
 
 function computePlayerToolTier(type) {
   let best = 0;
-  // Check both buckets - crafted tools land in inventory, starter/legacy tools in tools
-  for (const bucket of [me.tools, me.inventory]) {
-    for (const [k, amt] of Object.entries(bucket || {})) {
-      if (!amt || amt <= 0) continue;
-      const it = ITEMS[k];
-      if (!it || !it.tool) continue;
-      if (it.toolType === type && it.tier > best) best = it.tier;
-    }
+  const inv = me.inv || {};
+  for (const [k, amt] of Object.entries(inv)) {
+    if (!amt || amt <= 0) continue;
+    const it = ITEMS[k];
+    if (!it || !it.tool) continue;
+    if (it.toolType === type && it.tier > best) best = it.tier;
   }
   return best;
 }
 function findBestTool(type) {
   let best = null;
-  for (const bucket of [me.tools, me.inventory]) {
-    for (const [k, amt] of Object.entries(bucket || {})) {
-      if (!amt || amt <= 0) continue;
-      const it = ITEMS[k];
-      if (!it || !it.tool) continue;
-      if (it.toolType === type && (!best || it.tier > best.tier)) best = it;
-    }
+  const inv = me.inv || {};
+  for (const [k, amt] of Object.entries(inv)) {
+    if (!amt || amt <= 0) continue;
+    const it = ITEMS[k];
+    if (!it || !it.tool) continue;
+    if (it.toolType === type && (!best || it.tier > best.tier)) best = it;
   }
   return best;
 }
@@ -2166,6 +2265,7 @@ function renderAll() {
   renderInventoryPanel();
   updateHUD();
   updateTimeHUD();
+  renderDirty = false;
 }
 
 function updateHUD() {
@@ -2497,21 +2597,38 @@ function flashDamageText(x, y, text, color = 'red') {
   setTimeout(() => el.remove(), 1200);
 }
 
+// Render dirty-flag system. Set when something visual changes; cleared after each redraw.
+// World still redraws periodically for animations (water, day/night), but full redraw only when dirty.
+let renderDirty = true;
+let lastDayPhaseFrame = -1;
+function markDirty() { renderDirty = true; }
+
 function tickLoop() {
   animFrame++;
   renderTick++;
+  // Movement input
   if (!activeBattle && !document.getElementById('modal-bg').classList.contains('open')) {
     const now = Date.now();
     if (now - lastMoveTs > 130) {
-      if (keys['w'] || keys['arrowup']) { lastMoveTs = now; if (interior) moveBaseInteriorBy(0,-1); else moveBy(0,-1); }
-      else if (keys['s'] || keys['arrowdown']) { lastMoveTs = now; if (interior) moveBaseInteriorBy(0,1); else moveBy(0,1); }
-      else if (keys['a'] || keys['arrowleft']) { lastMoveTs = now; if (interior) moveBaseInteriorBy(-1,0); else moveBy(-1,0); }
-      else if (keys['d'] || keys['arrowright']) { lastMoveTs = now; if (interior) moveBaseInteriorBy(1,0); else moveBy(1,0); }
+      if (keys['w'] || keys['arrowup']) { lastMoveTs = now; if (interior) moveBaseInteriorBy(0,-1); else moveBy(0,-1); markDirty(); }
+      else if (keys['s'] || keys['arrowdown']) { lastMoveTs = now; if (interior) moveBaseInteriorBy(0,1); else moveBy(0,1); markDirty(); }
+      else if (keys['a'] || keys['arrowleft']) { lastMoveTs = now; if (interior) moveBaseInteriorBy(-1,0); else moveBy(-1,0); markDirty(); }
+      else if (keys['d'] || keys['arrowright']) { lastMoveTs = now; if (interior) moveBaseInteriorBy(1,0); else moveBy(1,0); markDirty(); }
     }
   }
-  if (renderTick % 3 === 0) {
+  // Day/night phase change → mark dirty (re-tint the world)
+  const phase = getCyclePhase ? getCyclePhase() : { isDay: true, progress: 0 };
+  const phaseSlot = Math.floor((phase.progress || 0) * 12); // 12 slots per cycle = ~1 dirty per minute of day
+  if (phaseSlot !== lastDayPhaseFrame) { lastDayPhaseFrame = phaseSlot; markDirty(); }
+
+  // Animated rendering: redraw every 6 frames if interior shows water/torches, otherwise only when dirty
+  // Water/day-night animation still needs ticking; do it every 6 frames (~10fps) which is plenty for ambient motion
+  const wantAnimTick = (renderTick % 6) === 0;
+  if (renderDirty || wantAnimTick) {
     if (!interior) renderWorld(); else renderInterior();
+    renderDirty = false;
   }
+  // Heavier UI-side things only every ~1 sec (60 frames @60fps)
   if (renderTick % 60 === 0) {
     renderMinimap();
     updateTimeHUD();
@@ -2542,8 +2659,8 @@ function buildPlayerCombatant() {
     { key: '_brace', pp: 10 },
     { key: '_heavy', pp: 10 },
   ];
-  if ((me.inventory.potion || 0) > 0 || (me.tools.potion || 0) > 0) {
-    moves.push({ key: '_potion', pp: Math.max(me.inventory.potion || 0, me.tools.potion || 0) });
+  if (invHave('potion') > 0) {
+    moves.push({ key: '_potion', pp: invHave('potion') });
   }
   return {
     id: '_player', isPlayer: true, species: '_player',
@@ -2555,6 +2672,46 @@ function buildPlayerCombatant() {
     statMods: { atk: 0, def: 0, spd: 0 },
     _atkBonus: atkBonus, _defBonus: defBonus
   };
+}
+
+// Sanitize a battle state object: ensures hp, maxHp, lvl, ivs, etc. on all combatants are valid numbers.
+// Called after battle init, after damage application, and after switch-in to prevent NaN propagation.
+function sanitizeBattleState(b) {
+  if (!b) return;
+  // Enemy
+  if (typeof b.enemyMaxHp !== 'number' || isNaN(b.enemyMaxHp) || b.enemyMaxHp <= 0) b.enemyMaxHp = 1;
+  if (b.enemy) {
+    if (typeof b.enemy.hp !== 'number' || isNaN(b.enemy.hp)) b.enemy.hp = b.enemyMaxHp;
+    if (b.enemy.hp < 0) b.enemy.hp = 0;
+    if (b.enemy.hp > b.enemyMaxHp) b.enemy.hp = b.enemyMaxHp;
+    if (typeof b.enemy.lvl !== 'number' || isNaN(b.enemy.lvl)) b.enemy.lvl = 1;
+  }
+  // Party
+  if (Array.isArray(b.party)) {
+    for (const c of b.party) {
+      if (!c) continue;
+      if (c.isPlayer) {
+        if (typeof c.maxHp !== 'number' || isNaN(c.maxHp) || c.maxHp <= 0) c.maxHp = 100;
+        if (typeof c.hp !== 'number' || isNaN(c.hp)) c.hp = c.maxHp;
+        if (c.hp < 0) c.hp = 0;
+        if (c.hp > c.maxHp) c.hp = c.maxHp;
+        if (typeof c.lvl !== 'number' || isNaN(c.lvl)) c.lvl = 1;
+        continue;
+      }
+      const sp = SPECIES[c.species];
+      const computedMax = sp ? calcStat('hp', sp.s[0], (c.ivs && c.ivs.hp) || 15, c.lvl || 1) : 20;
+      if (typeof c.maxHp !== 'number' || isNaN(c.maxHp) || c.maxHp <= 0) c.maxHp = computedMax;
+      if (typeof c.hp !== 'number' || isNaN(c.hp)) c.hp = c.maxHp;
+      if (c.hp < 0) c.hp = 0;
+      if (c.hp > c.maxHp) c.hp = c.maxHp;
+      if (typeof c.lvl !== 'number' || isNaN(c.lvl) || c.lvl < 1) c.lvl = 1;
+      if (!c.ivs) c.ivs = { hp:15, atk:15, def:15, spd:15 };
+      for (const k of ['hp','atk','def','spd']) {
+        if (typeof c.ivs[k] !== 'number' || isNaN(c.ivs[k])) c.ivs[k] = 15;
+      }
+      if (!c.statMods) c.statMods = { atk:0, def:0, spd:0 };
+    }
+  }
 }
 
 function startWildBattle(anchorId, spawn) {
@@ -2577,6 +2734,7 @@ function startWildBattle(anchorId, spawn) {
     caught: false,
     fled: false,
   };
+  sanitizeBattleState(activeBattle);
   me.seen[spawn.species] = me.seen[spawn.species] || { seen: true };
   renderBattleUI();
 }
@@ -2594,6 +2752,7 @@ function startNpcBattle(npc, village) {
     canCatch: false, turn: 0, xpReward: 0, goldReward: 0, caught: false, fled: false,
     questReward: npc.quest.reward
   };
+  sanitizeBattleState(activeBattle);
   renderBattleUI();
 }
 
@@ -2610,6 +2769,7 @@ function startPvpBattle(enemyData) {
     log: [`${enemyData.nickname} challenges you!`],
     canCatch: false, turn: 0, fled: false,
   };
+  sanitizeBattleState(activeBattle);
   renderBattleUI();
 }
 
@@ -2768,6 +2928,12 @@ function renderBattleUI() {
       });
     }
   });
+  // Apply input lock based on current phase
+  const modalEl = document.getElementById('modal');
+  if (modalEl) {
+    const inputLocked = !battleAcceptsInput() && b.phase !== 'ended';
+    modalEl.classList.toggle('battle-locked', inputLocked);
+  }
 }
 
 function battleLog(msg) {
@@ -2788,10 +2954,9 @@ async function onPickMove(moveIdx) {
 
   // Handle _potion specifically
   if (move.key === '_potion') {
-    const hadPotion = (me.inventory.potion || 0) > 0 || (me.tools.potion || 0) > 0;
+    const hadPotion = invHave('potion') > 0;
     if (!hadPotion) { battleLog("You're out of potions."); renderBattleUI(); return; }
-    if (me.inventory.potion) me.inventory.potion--;
-    else me.tools.potion = Math.max(0, (me.tools.potion || 0) - 1);
+    invRemove('potion', 1);
     move.pp--;
   } else {
     move.pp--;
@@ -2835,6 +3000,14 @@ async function onPickMove(moveIdx) {
 }
 
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Battle input gate: only these phases accept user input.
+// Used by all battle action handlers to prevent rapid-click race conditions.
+function battleAcceptsInput() {
+  const b = activeBattle;
+  if (!b) return false;
+  return ['pick_move', 'pick_fight', 'pick_party', 'must_switch'].includes(b.phase);
+}
 
 function calcStatBattle(c, stat) {
   if (c.isPlayer) {
@@ -2926,8 +3099,8 @@ function performMove(attacker, defender, move, isPlayer) {
   // Damage calculation
   const atk = calcStatBattle(attacker, 'atk');
   const defStat = calcStatBattle(defender, 'def');
-  const power = def.power;
-  let dmg = Math.floor(((2 * attacker.lvl / 5 + 2) * power * atk / defStat) / 50) + 2;
+  const power = def.power || 0;
+  let dmg = Math.floor(((2 * attacker.lvl / 5 + 2) * power * atk / Math.max(1, defStat)) / 50) + 2;
   // STAB
   if (!attacker.isPlayer && atSp.t === def.type) dmg = Math.floor(dmg * 1.5);
   // Type effectiveness
@@ -2938,9 +3111,13 @@ function performMove(attacker, defender, move, isPlayer) {
   dmg = Math.floor(dmg * crit);
   // Random factor
   dmg = Math.floor(dmg * (0.85 + Math.random() * 0.15));
+  if (isNaN(dmg) || dmg < 1) dmg = 1;
   dmg = Math.max(1, dmg);
 
-  defender.hp = Math.max(0, defender.hp - dmg);
+  // NaN-proof HP application — if defender.hp is somehow NaN, treat as full HP first
+  const defMax = defender.maxHp || 1;
+  if (typeof defender.hp !== 'number' || isNaN(defender.hp)) defender.hp = defMax;
+  defender.hp = Math.max(0, Math.min(defMax, defender.hp - dmg));
   if (!defender.isPlayer) {}
   else me.hp = defender.hp;
 
@@ -3107,6 +3284,7 @@ function onBattleDefeat() {
 function onSwitchTo(idx) {
   const b = activeBattle;
   if (!b) return;
+  if (!battleAcceptsInput()) return;
   const c = b.party[idx];
   if (!c || c.hp <= 0) return;
   if (idx === b.activeIdx) {
@@ -3144,34 +3322,16 @@ function onSwitchTo(idx) {
 async function onAttemptCatch() {
   const b = activeBattle;
   if (!b || !b.canCatch) return;
-  // Safe lookups across both buckets
-  const tools = me.tools || {};
-  const inv = me.inventory || me.inv || {};
-  function netCount(key) {
-    return (Number(tools[key]) || 0) + (Number(inv[key]) || 0);
-  }
-  function consumeNet(key) {
-    if ((Number(tools[key]) || 0) > 0) {
-      tools[key]--;
-      if (tools[key] <= 0) delete tools[key];
-    } else if ((Number(inv[key]) || 0) > 0) {
-      inv[key]--;
-      if (inv[key] <= 0) delete inv[key];
-    }
-    me.tools = tools;
-    me.inventory = inv;
-    me.inv = inv;
-  }
+  if (!battleAcceptsInput()) return; // race-condition guard
   let netKey = null;
-  if (netCount('master_net') > 0) netKey = 'master_net';
-  else if (netCount('tame_net') > 0) netKey = 'tame_net';
+  if (invHave('master_net') > 0) netKey = 'master_net';
+  else if (invHave('tame_net') > 0) netKey = 'tame_net';
   if (!netKey) {
-    const tn = netCount('tame_net'), mn = netCount('master_net');
-    battleLog(`No nets! (tame:${tn} master:${mn}) — Craft some at the workbench.`);
+    battleLog(`No nets! Craft one at the workbench.`);
     renderBattleUI();
     return;
   }
-  consumeNet(netKey);
+  invRemove(netKey, 1);
   const enSp = SPECIES[b.enemy.species];
   const hpRatio = b.enemy.hp / b.enemyMaxHp;
   let baseChance = RARITY_CATCH_MULT[enSp.r] * (1 - hpRatio * 0.7);
@@ -3216,6 +3376,7 @@ async function onAttemptCatch() {
 async function onAttemptFlee() {
   const b = activeBattle;
   if (!b) return;
+  if (!battleAcceptsInput()) return;
   if (b.type !== 'wild') {
     battleLog("You can't flee this battle.");
     renderBattleUI();
@@ -3557,23 +3718,54 @@ function openCreatureDetail(source, idx) {
   if (!c) return;
   const sp = SPECIES[c.species];
   if (!sp) return;
-  const maxHp = calcStat('hp', sp.b.hp, c.ivs.hp, c.lvl);
-  const atk = calcStat('atk', sp.b.atk, c.ivs.atk, c.lvl);
-  const def = calcStat('def', sp.b.def, c.ivs.def, c.lvl);
-  const spd = calcStat('spd', sp.b.spd, c.ivs.spd, c.lvl);
+  const maxHp = c.maxHp || calcStat('hp', sp.s[0], c.ivs.hp, c.lvl);
+  const atk = calcStat('atk', sp.s[1], c.ivs.atk, c.lvl);
+  const def = calcStat('def', sp.s[2], c.ivs.def, c.lvl);
+  const spd = calcStat('spd', sp.s[3], c.ivs.spd, c.lvl);
   const movesHTML = (c.moves || []).map(m => {
-    const mv = MOVES[m];
+    const mvKey = typeof m === 'string' ? m : m.key;
+    const mv = MOVES[mvKey];
     return mv ? `<div class="mv-item"><span class="t-${mv.t}">${mv.n}</span><span class="muted small">PWR ${mv.p}</span></div>` : '';
   }).join('');
   const ivAvg = Math.round(((c.ivs.hp + c.ivs.atk + c.ivs.def + c.ivs.spd) / 124) * 100);
-  const evoTxt = sp.evo ? `Evolves to ${SPECIES[sp.evo.to]?.n} at Lv ${sp.evo.lvl}` : 'Final form';
+  const evoTxt = sp.evo ? `Evolves to ${SPECIES[sp.evo.to]?.n || '?'} at Lv ${sp.evo.lv || sp.evo.lvl || '?'}` : 'Final form';
+
+  const partyFull = me.party.length >= PARTY_SIZE;
+  const buttons = [];
+
+  if (source === 'party' && me.party.length > 1) {
+    buttons.push({ text: 'Send to Storage', onclick: () => {
+      me.creatureStorage[c.id] = c;
+      me.party.splice(idx, 1);
+      savePlayer(); renderPartyPanel(); closeModal();
+    }});
+  }
+  if (source === 'storage') {
+    if (!partyFull) {
+      buttons.push({ text: 'Add to Party', primary: true, onclick: () => {
+        me.party.push(c);
+        delete me.creatureStorage[idx];
+        savePlayer(); renderPartyPanel(); closeModal();
+      }});
+    } else {
+      // Party full → offer Swap. One click opens picker, one click completes swap.
+      buttons.push({ text: 'Swap with Party Member', primary: true, onclick: () => openSwapPicker(c, idx) });
+    }
+  }
+  if (myBase && (myBase.maxTrainers || 0) > Object.keys(myBase.assignedTrainers || {}).length) {
+    buttons.push({ text: 'Assign to Training', onclick: () => { assignTrainer(c.id); closeModal(); }});
+  }
+  buttons.push({ text: 'Rename', onclick: () => renameCreature(c, source, idx) });
+  buttons.push({ text: 'Release', danger: true, onclick: () => releaseCreature(source, idx) });
+  buttons.push({ text: 'Close', onclick: () => closeModal() });
+
   openModal({
-    title: `${sp.e} ${c.name || sp.n}`,
+    title: `${sp.e || sp.g} ${c.name || sp.n}`,
     wide: true,
     bodyHTML: `
       <div class="cd-wrap">
         <div class="cd-col">
-          <div class="cd-big-emoji">${sp.e}</div>
+          <div class="cd-big-emoji">${sp.e || sp.g}</div>
           <div class="cd-types">${sp.tArr.map(t => `<span class="t-${t} big">${t}</span>`).join(" ")}</div>
           <div class="muted">Level ${c.lvl} · ${c.xp} XP</div>
           <div class="muted small">IV score: ${ivAvg}%</div>
@@ -3590,14 +3782,52 @@ function openCreatureDetail(source, idx) {
         </div>
       </div>
     `,
-    buttons: [
-      source === 'party' && me.party.length > 1 ? { text: 'Send to Storage', onclick: () => { me.creatureStorage[c.id] = c; me.party.splice(idx, 1); savePlayer(); renderPartyPanel(); closeModal(); }} : null,
-      source === 'storage' && me.party.length < PARTY_SIZE ? { text: 'Add to Party', primary: true, onclick: () => { me.party.push(c); delete me.creatureStorage[idx]; savePlayer(); renderPartyPanel(); closeModal(); }} : null,
-      myBase && myBase.trainers < (myBase.maxTrainers||0) ? { text: 'Assign to Training', onclick: () => { assignTrainer(c.id); closeModal(); }} : null,
-      { text: 'Rename', onclick: () => renameCreature(c, source, idx) },
-      { text: 'Release', danger: true, onclick: () => releaseCreature(source, idx) },
-      { text: 'Close', onclick: () => closeModal() }
-    ].filter(Boolean)
+    buttons
+  });
+}
+
+function openSwapPicker(storedCreature, storageIdx) {
+  // Show party slots; tapping one swaps that party member to storage and the stored creature to that slot.
+  let html = '<div class="muted small">Pick which party member to swap out:</div><div class="swap-list">';
+  for (let i = 0; i < me.party.length; i++) {
+    const p = me.party[i];
+    const psp = SPECIES[p.species];
+    if (!psp) continue;
+    const pMax = p.maxHp || calcStat('hp', psp.s[0], p.ivs.hp, p.lvl);
+    html += `
+      <div class="swap-row" data-slot="${i}" style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid #3a2410;cursor:pointer;">
+        <div style="font-size:28px;">${psp.e || psp.g}</div>
+        <div style="flex:1;">
+          <div><b>${p.name || psp.n}</b> · Lv ${p.lvl}</div>
+          <div class="small muted">HP ${p.hp}/${pMax}</div>
+        </div>
+        <div style="font-size:24px;">⇄</div>
+        <div style="font-size:28px;">${SPECIES[storedCreature.species].e || SPECIES[storedCreature.species].g}</div>
+      </div>`;
+  }
+  html += '</div>';
+  openModal({
+    title: 'Swap Creature',
+    wide: true,
+    bodyHTML: html,
+    buttons: [{ text: 'Cancel', onclick: () => closeModal() }],
+    onBody: () => {
+      document.querySelectorAll('[data-slot]').forEach(n => {
+        n.onclick = () => {
+          const slot = parseInt(n.dataset.slot);
+          const partyMember = me.party[slot];
+          if (!partyMember) return;
+          // Swap: party member goes to storage, stored creature goes to party
+          me.creatureStorage[partyMember.id] = partyMember;
+          me.party[slot] = storedCreature;
+          delete me.creatureStorage[storageIdx];
+          savePlayer();
+          addLog(`Swapped ${SPECIES[partyMember.species].n} → storage, ${SPECIES[storedCreature.species].n} → party.`, 'good');
+          closeModal();
+          renderPartyPanel();
+        };
+      });
+    }
   });
 }
 
@@ -3837,7 +4067,7 @@ function renderBasePanel() {
       ${nextDef ? `
         <div class="muted small">Next: ${nextDef.name} (Lv ${lvl + 1})</div>
         <div class="muted small">Unlocks: ${nextDef.maxStructures} structures, ${nextDef.maxFarms} farms, ${nextDef.maxTrainers} training posts</div>
-        <div class="cost-line">${Object.entries(nextDef.upgradeCost).map(([k,v]) => { const it = ITEMS[k]; const have = me.inv[k]||0; return `<span class="cost-tag ${have>=v?'ok':'bad'}">${it?.emoji||''}${v}</span>`; }).join(' ')}</div>
+        <div class="cost-line">${Object.entries(nextDef.upgradeCost).map(([k,v]) => { const it = ITEMS[k]; const have = invHave(k); return `<span class="cost-tag ${have>=v?'ok':'bad'}">${k==='gold'?'💰':(it?.emoji||'')}${v}</span>`; }).join(' ')}</div>
         <button class="btn primary" id="btn-upgrade-base">Upgrade</button>
       ` : `<div class="muted">Max level.</div>`}
     </div>
@@ -3964,18 +4194,16 @@ function upgradeBase() {
   const lvl = myBase.level || 1;
   const nextDef = BASE_LEVELS[lvl + 1];
   if (!nextDef) return;
-  for (const [ck, cq] of Object.entries(nextDef.upgradeCost)) {
-    if ((me.inv[ck] || 0) < cq) { addLog('Not enough materials.', 'warn'); return; }
-  }
-  for (const [ck, cq] of Object.entries(nextDef.upgradeCost)) {
-    me.inv[ck] -= cq;
-    if (me.inv[ck] <= 0) delete me.inv[ck];
-  }
+  if (!canAfford(nextDef.upgradeCost)) { addLog('Not enough materials.', 'warn'); return; }
+  payCost(nextDef.upgradeCost);
   myBase.level = lvl + 1;
   saveBase();
   savePlayer();
   addLog(`Base upgraded to ${nextDef.name}!`, 'good');
   renderBasePanel();
+  renderInventoryPanel();
+  renderStatsPanel();
+  updateHUD();
 }
 
 function openInstallEquipment() {
