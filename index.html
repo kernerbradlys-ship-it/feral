@@ -3133,24 +3133,30 @@ function onSwitchTo(idx) {
 async function onAttemptCatch() {
   const b = activeBattle;
   if (!b || !b.canCatch) return;
-  // Helper: count + source ('tools' or 'inventory')
+  // Safe lookups across both buckets
+  const tools = me.tools || {};
+  const inv = me.inventory || me.inv || {};
   function netCount(key) {
-    return (me.tools[key] || 0) + (me.inventory[key] || 0);
+    return (Number(tools[key]) || 0) + (Number(inv[key]) || 0);
   }
   function consumeNet(key) {
-    if ((me.tools[key] || 0) > 0) {
-      me.tools[key]--;
-      if (me.tools[key] <= 0) delete me.tools[key];
-    } else if ((me.inventory[key] || 0) > 0) {
-      me.inventory[key]--;
-      if (me.inventory[key] <= 0) delete me.inventory[key];
+    if ((Number(tools[key]) || 0) > 0) {
+      tools[key]--;
+      if (tools[key] <= 0) delete tools[key];
+    } else if ((Number(inv[key]) || 0) > 0) {
+      inv[key]--;
+      if (inv[key] <= 0) delete inv[key];
     }
+    me.tools = tools;
+    me.inventory = inv;
+    me.inv = inv;
   }
   let netKey = null;
   if (netCount('master_net') > 0) netKey = 'master_net';
   else if (netCount('tame_net') > 0) netKey = 'tame_net';
   if (!netKey) {
-    battleLog("You have no nets! Craft some at the workbench.");
+    const tn = netCount('tame_net'), mn = netCount('master_net');
+    battleLog(`No nets! (tame:${tn} master:${mn}) — Craft some at the workbench.`);
     renderBattleUI();
     return;
   }
