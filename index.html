@@ -1347,7 +1347,7 @@ function ensureCreatureSchema(c) {
   if (!c.statMods) c.statMods = { atk: 0, def: 0, spd: 0 };
   if (typeof c.statusTurnsLeft !== 'number') c.statusTurnsLeft = 0;
   c.maxHp = calcStat('hp', sp.s[0], c.ivs.hp, c.lvl);
-  if (typeof c.hp !== 'number' || c.hp > c.maxHp) c.hp = c.maxHp;
+  if (typeof c.hp !== 'number' || isNaN(c.hp) || c.hp > c.maxHp || c.hp < 0) c.hp = c.maxHp;
 }
 
 // ============================================================
@@ -1509,6 +1509,12 @@ async function attemptEnter() {
       me.eggs = me.eggs || {};
       // If they have a saved base, flag hasBase so the UI works
       if (myBase && typeof me.hasBase === 'undefined') me.hasBase = true;
+      // Sanitize player HP — NaN passes typeof number check, so explicit isNaN guard
+      if (typeof me.lvl !== 'number' || isNaN(me.lvl)) me.lvl = 1;
+      if (typeof me.maxHp !== 'number' || isNaN(me.maxHp) || me.maxHp <= 0) me.maxHp = 80 + me.lvl * 12;
+      if (typeof me.hp !== 'number' || isNaN(me.hp) || me.hp < 0 || me.hp > me.maxHp) me.hp = me.maxHp;
+      if (typeof me.xp !== 'number' || isNaN(me.xp)) me.xp = 0;
+      if (typeof me.gold !== 'number' || isNaN(me.gold)) me.gold = 0;
       me.party.forEach(ensureCreatureSchema);
       Object.values(me.creatureStorage).forEach(ensureCreatureSchema);
     }
@@ -2617,8 +2623,13 @@ function renderBattleUI() {
   const enSp = SPECIES[enemy.species];
   const acSp = SPECIES[active.species];
 
+  // Sanitize HP — NaN-proof the display
+  const acMax = active.maxHp || (acSp ? calcStat('hp', acSp.s[0], active.ivs?.hp || 15, active.lvl || 1) : 1);
+  if (typeof active.hp !== 'number' || isNaN(active.hp) || active.hp < 0 || active.hp > acMax) active.hp = acMax;
+  if (typeof enemy.hp !== 'number' || isNaN(enemy.hp) || enemy.hp < 0) enemy.hp = b.enemyMaxHp;
+
   const enHpPct = Math.max(0, enemy.hp / b.enemyMaxHp);
-  const acHpPct = Math.max(0, active.hp / (active.maxHp || calcStat('hp', acSp.s[0], active.ivs.hp, active.lvl)));
+  const acHpPct = Math.max(0, active.hp / acMax);
 
   const hpClass = (p) => p > 0.5 ? '' : (p > 0.25 ? 'mid' : 'low');
 
@@ -2721,7 +2732,7 @@ function renderBattleUI() {
   openModal({
     title: b.type === 'wild' ? 'WILD BATTLE' : (b.type === 'pvp' ? 'PvP DUEL' : 'DUEL'),
     bodyHTML,
-    buttons: b.phase === 'ended' ? [] : null,
+    buttons: [],
     forceOpen: true,  // cannot close X-out of battle
     wide: true,
     onBody: (body) => {
