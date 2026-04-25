@@ -684,7 +684,29 @@ catch (e) { console.error("Firebase init failed:", e); }
 // SCHEMA VERSION — bump on breaking changes; triggers migration/reset
 // ============================================================
 const SCHEMA_VERSION = 4;
-const WIPE_DATA_VERSION = 4;  // reinit any player with version < this
+const WIPE_DATA_VERSION = 4;
+
+// === GOD MODE EARLY INIT (HOTFIX) ===
+// Defined at module scope so functions like tryMove/recomputeSpeedBonus
+// that reference godMode at module-init time don't throw "godMode is not defined".
+window.godMode = JSON.parse(localStorage.getItem('feral_godmode') || 'null') || {
+  enabled: false, invincible: false, noEncounters: false,
+  fastTravel: false, phaseWalk: false, journal: []
+};
+const godMode = window.godMode;
+// === END HOTFIX ===
+
+// === MINIMAP ZOOM (HOTFIX) ===
+// renderMinimap() references minimapZoom and the +/- buttons call setMinimapZoom();
+// neither was defined in v2 — define them here.
+let minimapZoom = 30;
+function setMinimapZoom(n) {
+  minimapZoom = Math.max(4, Math.min(120, n|0));
+  if (typeof renderMinimap === 'function') renderMinimap();
+}
+// === END HOTFIX ===
+
+  // reinit any player with version < this
 
 // ============================================================
 // WORLD CONSTANTS
