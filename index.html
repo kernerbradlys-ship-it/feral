@@ -3127,16 +3127,28 @@ function onSwitchTo(idx) {
 async function onAttemptCatch() {
   const b = activeBattle;
   if (!b || !b.canCatch) return;
-  // Use best net
+  // Helper: count + source ('tools' or 'inventory')
+  function netCount(key) {
+    return (me.tools[key] || 0) + (me.inventory[key] || 0);
+  }
+  function consumeNet(key) {
+    if ((me.tools[key] || 0) > 0) {
+      me.tools[key]--;
+      if (me.tools[key] <= 0) delete me.tools[key];
+    } else if ((me.inventory[key] || 0) > 0) {
+      me.inventory[key]--;
+      if (me.inventory[key] <= 0) delete me.inventory[key];
+    }
+  }
   let netKey = null;
-  if ((me.tools.master_net || 0) > 0) netKey = 'master_net';
-  else if ((me.tools.tame_net || 0) > 0) netKey = 'tame_net';
+  if (netCount('master_net') > 0) netKey = 'master_net';
+  else if (netCount('tame_net') > 0) netKey = 'tame_net';
   if (!netKey) {
     battleLog("You have no nets! Craft some at the workbench.");
     renderBattleUI();
     return;
   }
-  me.tools[netKey] = Math.max(0, me.tools[netKey] - 1);
+  consumeNet(netKey);
   const enSp = SPECIES[b.enemy.species];
   const hpRatio = b.enemy.hp / b.enemyMaxHp;
   let baseChance = RARITY_CATCH_MULT[enSp.r] * (1 - hpRatio * 0.7);
